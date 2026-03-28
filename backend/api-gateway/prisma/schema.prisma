@@ -1,0 +1,515 @@
+// ============================================================
+// SPYCE Prisma Schema
+// ⚠️  UPDATE: datasource url in .env as DATABASE_URL
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  piUid          String   @unique @map("pi_uid") @db.VarChar(64)
+  piUsername     String   @unique @map("pi_username") @db.VarChar(64)
+  displayName    String   @map("display_name") @db.VarChar(100)
+  bio            String?
+  avatarUrl      String?  @map("avatar_url")
+  coverUrl       String?  @map("cover_url")
+  spyceScore     Int      @default(0) @map("spyce_score")
+  piBalance      BigInt   @default(0) @map("pi_balance")
+  role           String   @default("user") @db.VarChar(20)
+  isVerified     Boolean  @default(false) @map("is_verified")
+  kycStatus      String   @default("pending") @map("kyc_status") @db.VarChar(20)
+  countryCode    String?  @map("country_code") @db.Char(2)
+  referralCode   String?  @unique @map("referral_code") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("created_at")
+  lastActiveAt   DateTime? @map("last_active_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  videos              Video[]
+  reactions           VideoReaction[]
+  comments            Comment[]
+  savedVideos         VideoSave[]
+  challengeCompletions ChallengeCompletion[]
+  userStreaks          UserStreak[]
+  piTransactions      PiTransaction[]
+  piVaults            PiVault[]
+  products            Product[]
+  buyerOrders         Order[]   @relation("BuyerOrders")
+  sellerOrders        Order[]   @relation("SellerOrders")
+  reviews             Review[]
+  notifications       Notification[]
+  liveStreams         LiveStream[]
+  followersList       UserFollow[] @relation("Follower")
+  followingList       UserFollow[] @relation("Following")
+  settings            UserSettings?
+  squadsCreated       SquadChallenge[] @relation("SquadCreator")
+  squadMemberships    SquadMember[]
+  referralsMade       Referral[] @relation("Referrer")
+  referral            Referral?  @relation("Referred")
+  bountySubmissions   BountySubmission[]
+  liveGiftsSent       LiveGift[] @relation("GiftSender")
+  leaderboardEntries  LeaderboardSnapshot[]
+  affiliateOrders     Order[]   @relation("AffiliateOrders")
+  sounds              Sound[]
+
+  @@map("users")
+}
+
+model UserFollow {
+  followerId  String   @map("follower_id") @db.Uuid
+  followingId String   @map("following_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  @@map("user_follows")
+}
+
+model UserSettings {
+  userId          String  @id @map("user_id") @db.Uuid
+  pushEnabled     Boolean @default(true) @map("push_enabled")
+  earnNotifs      Boolean @default(true) @map("earn_notifs")
+  challengeNotifs Boolean @default(true) @map("challenge_notifs")
+  privacyMode     String  @default("public") @map("privacy_mode") @db.VarChar(20)
+  preferredLang   String  @default("en-US") @map("preferred_lang") @db.Char(5)
+  allowDuets      Boolean @default(true) @map("allow_duets")
+  allowStitches   Boolean @default(true) @map("allow_stitches")
+  allowDownloads  Boolean @default(true) @map("allow_downloads")
+  user            User    @relation(fields: [userId], references: [id])
+
+  @@map("user_settings")
+}
+
+model Sound {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String   @db.VarChar(200)
+  artist      String?  @db.VarChar(200)
+  durationSecs Int?    @map("duration_secs") @db.SmallInt
+  audioKey    String?  @map("audio_key")
+  coverKey    String?  @map("cover_key")
+  useCount    BigInt   @default(0) @map("use_count")
+  isOriginal  Boolean  @default(false) @map("is_original")
+  userId      String?  @map("user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User?    @relation(fields: [userId], references: [id])
+  videos      Video[]
+
+  @@map("sounds")
+}
+
+model Video {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  title           String?   @db.VarChar(300)
+  description     String?
+  status          String    @default("processing") @db.VarChar(20)
+  visibility      String    @default("public") @db.VarChar(20)
+  durationSecs    Int?      @map("duration_secs") @db.SmallInt
+  width           Int?      @db.SmallInt
+  height          Int?      @db.SmallInt
+  rawKey          String?   @map("raw_key")
+  hlsKey          String?   @map("hls_key")
+  thumbnailKey    String?   @map("thumbnail_key")
+  viewCount       BigInt    @default(0) @map("view_count")
+  likeCount       BigInt    @default(0) @map("like_count")
+  commentCount    BigInt    @default(0) @map("comment_count")
+  shareCount      BigInt    @default(0) @map("share_count")
+  saveCount       BigInt    @default(0) @map("save_count")
+  engagementScore Float     @default(0) @map("engagement_score")
+  isChallenge     Boolean   @default(false) @map("is_challenge")
+  challengeId     String?   @map("challenge_id") @db.Uuid
+  parentId        String?   @map("parent_id") @db.Uuid
+  duetType        String?   @map("duet_type") @db.VarChar(10)
+  soundId         String?   @map("sound_id") @db.Uuid
+  locationLat     Decimal?  @map("location_lat") @db.Decimal(9, 6)
+  locationLon     Decimal?  @map("location_lon") @db.Decimal(9, 6)
+  publishedAt     DateTime? @map("published_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent          Video?          @relation("DuetParent", fields: [parentId], references: [id])
+  children        Video[]         @relation("DuetParent")
+  sound           Sound?          @relation(fields: [soundId], references: [id])
+  hashtags        VideoHashtag[]
+  reactions       VideoReaction[]
+  comments        Comment[]
+  saves           VideoSave[]
+  products        Product[]       @relation("ProductDemoVideo")
+  bountySubmissions BountySubmission[]
+
+  @@map("videos")
+}
+
+model Hashtag {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tag       String         @unique @db.VarChar(150)
+  useCount  BigInt         @default(0) @map("use_count")
+  createdAt DateTime       @default(now()) @map("created_at")
+  videos    VideoHashtag[]
+
+  @@map("hashtags")
+}
+
+model VideoHashtag {
+  videoId String  @map("video_id") @db.Uuid
+  tagId   String  @map("tag_id") @db.Uuid
+  video   Video   @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  tag     Hashtag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, tagId])
+  @@map("video_hashtags")
+}
+
+model VideoReaction {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  videoId    String   @map("video_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  type       String   @default("like") @db.VarChar(20)
+  piAwarded  BigInt   @default(0) @map("pi_awarded")
+  createdAt  DateTime @default(now()) @map("created_at")
+  video      Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, userId, type])
+  @@map("video_reactions")
+}
+
+model Comment {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  videoId    String    @map("video_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  parentId   String?   @map("parent_id") @db.Uuid
+  body       String
+  likeCount  Int       @default(0) @map("like_count")
+  piAwarded  BigInt    @default(0) @map("pi_awarded")
+  isPinned   Boolean   @default(false) @map("is_pinned")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  video      Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent     Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies    Comment[] @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+model VideoSave {
+  userId    String   @map("user_id") @db.Uuid
+  videoId   String   @map("video_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@id([userId, videoId])
+  @@map("video_saves")
+}
+
+model ChallengeTemplate {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title        String   @db.VarChar(200)
+  description  String?
+  category     String?  @db.VarChar(50)
+  difficulty   String   @default("bronze") @db.VarChar(10)
+  verification String?  @db.VarChar(20)
+  piReward     BigInt   @map("pi_reward")
+  bonusStreak  BigInt   @default(0) @map("bonus_streak")
+  durationSecs Int?     @map("duration_secs")
+  targetValue  Float?   @map("target_value")
+  targetUnit   String?  @map("target_unit") @db.VarChar(20)
+  maxPerDay    Int      @default(1) @map("max_per_day") @db.SmallInt
+  iconKey      String?  @map("icon_key")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  dailyChallenges ChallengeCompletion[]
+  dailySchedule   DailyChallenge[]
+  userStreaks      UserStreak[]
+  squadChallenges SquadChallenge[]
+
+  @@map("challenge_templates")
+}
+
+model DailyChallenge {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId    String   @map("template_id") @db.Uuid
+  date          DateTime @db.Date
+  featuredOrder Int?     @map("featured_order") @db.SmallInt
+  bonusPool     BigInt   @default(0) @map("bonus_pool")
+  template      ChallengeTemplate @relation(fields: [templateId], references: [id])
+  completions   ChallengeCompletion[]
+
+  @@unique([templateId, date])
+  @@map("daily_challenges")
+}
+
+model ChallengeCompletion {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  challengeId  String    @map("challenge_id") @db.Uuid
+  dailyId      String?   @map("daily_id") @db.Uuid
+  status       String    @default("pending") @db.VarChar(20)
+  proofType    String?   @map("proof_type") @db.VarChar(20)
+  proofUrl     String?   @map("proof_url")
+  sensorData   Json?     @map("sensor_data")
+  aiConfidence Float?    @map("ai_confidence")
+  piAwarded    BigInt    @default(0) @map("pi_awarded")
+  streakDay    Int       @default(1) @map("streak_day")
+  verifiedAt   DateTime? @map("verified_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge    ChallengeTemplate @relation(fields: [challengeId], references: [id])
+  daily        DailyChallenge? @relation(fields: [dailyId], references: [id])
+
+  @@map("challenge_completions")
+}
+
+model UserStreak {
+  userId         String    @map("user_id") @db.Uuid
+  challengeId    String    @map("challenge_id") @db.Uuid
+  currentStreak  Int       @default(0) @map("current_streak")
+  longestStreak  Int       @default(0) @map("longest_streak")
+  lastCompleted  DateTime? @map("last_completed") @db.Date
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge      ChallengeTemplate @relation(fields: [challengeId], references: [id])
+
+  @@id([userId, challengeId])
+  @@map("user_streaks")
+}
+
+model SquadChallenge {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String?  @db.VarChar(100)
+  creatorId  String   @map("creator_id") @db.Uuid
+  templateId String   @map("template_id") @db.Uuid
+  startDate  DateTime? @map("start_date") @db.Date
+  endDate    DateTime? @map("end_date") @db.Date
+  memberCap  Int      @default(10) @map("member_cap") @db.SmallInt
+  piPool     BigInt   @default(0) @map("pi_pool")
+  createdAt  DateTime @default(now()) @map("created_at")
+  creator    User     @relation("SquadCreator", fields: [creatorId], references: [id])
+  template   ChallengeTemplate @relation(fields: [templateId], references: [id])
+  members    SquadMember[]
+
+  @@map("squad_challenges")
+}
+
+model SquadMember {
+  squadId      String   @map("squad_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  joinedAt     DateTime @default(now()) @map("joined_at")
+  totalPiEarned BigInt  @default(0) @map("total_pi_earned")
+  squad        SquadChallenge @relation(fields: [squadId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([squadId, userId])
+  @@map("squad_members")
+}
+
+model PiTransaction {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  type          String   @db.VarChar(30)
+  amountMicroPi BigInt   @map("amount_micro_pi")
+  direction     String?  @db.Char(6)
+  balanceAfter  BigInt   @map("balance_after")
+  refType       String?  @map("ref_type") @db.VarChar(30)
+  refId         String?  @map("ref_id") @db.Uuid
+  piTxId        String?  @map("pi_tx_id") @db.VarChar(200)
+  piTxMemo      String?  @map("pi_tx_memo")
+  status        String   @default("completed") @db.VarChar(20)
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@map("pi_transactions")
+}
+
+model PiVault {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  amount      BigInt
+  apyBps      Int      @default(500) @map("apy_bps")
+  lockedUntil DateTime @map("locked_until")
+  status      String   @default("active") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("pi_vaults")
+}
+
+model Referral {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  referrerId  String    @map("referrer_id") @db.Uuid
+  referredId  String    @unique @map("referred_id") @db.Uuid
+  code        String    @unique @db.VarChar(20)
+  status      String    @default("pending") @db.VarChar(20)
+  piAwarded   BigInt    @default(0) @map("pi_awarded")
+  qualifiedAt DateTime? @map("qualified_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  referrer    User      @relation("Referrer", fields: [referrerId], references: [id])
+  referred    User      @relation("Referred", fields: [referredId], references: [id])
+
+  @@map("referrals")
+}
+
+model Product {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sellerId      String    @map("seller_id") @db.Uuid
+  title         String    @db.VarChar(300)
+  description   String?
+  category      String?   @db.VarChar(50)
+  productType   String?   @map("product_type") @db.VarChar(20)
+  priceMicroPi  BigInt    @map("price_micro_pi")
+  stock         Int?
+  mediaKeys     String[]  @map("media_keys")
+  demoVideoId   String?   @map("demo_video_id") @db.Uuid
+  tags          String[]
+  isActive      Boolean   @default(true) @map("is_active")
+  totalSales    Int       @default(0) @map("total_sales")
+  avgRating     Float     @default(0) @map("avg_rating")
+  boostedUntil  DateTime? @map("boosted_until")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  seller        User      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  demoVideo     Video?    @relation("ProductDemoVideo", fields: [demoVideoId], references: [id])
+  orders        Order[]
+  reviews       Review[]
+
+  @@map("products")
+}
+
+model Order {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  buyerId      String   @map("buyer_id") @db.Uuid
+  sellerId     String   @map("seller_id") @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  quantity     Int      @default(1)
+  unitPrice    BigInt   @map("unit_price")
+  totalPrice   BigInt   @map("total_price")
+  platformFee  BigInt   @map("platform_fee")
+  status       String   @default("pending") @db.VarChar(20)
+  escrowTxId   String?  @map("escrow_tx_id") @db.VarChar(200)
+  deliveryData Json?    @map("delivery_data")
+  affiliateId  String?  @map("affiliate_id") @db.Uuid
+  affiliateFee BigInt   @default(0) @map("affiliate_fee")
+  createdAt    DateTime @default(now()) @map("created_at")
+  buyer        User     @relation("BuyerOrders", fields: [buyerId], references: [id])
+  seller       User     @relation("SellerOrders", fields: [sellerId], references: [id])
+  product      Product  @relation(fields: [productId], references: [id])
+  affiliate    User?    @relation("AffiliateOrders", fields: [affiliateId], references: [id])
+  review       Review?
+
+  @@map("orders")
+}
+
+model Review {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId   String   @unique @map("order_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  rating    Int      @db.SmallInt
+  body      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  order     Order    @relation(fields: [orderId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+  product   Product  @relation(fields: [productId], references: [id])
+
+  @@map("reviews")
+}
+
+model Notification {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String   @db.VarChar(50)
+  title     String?  @db.VarChar(200)
+  body      String?
+  data      Json?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model LiveStream {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  title         String?   @db.VarChar(300)
+  status        String    @default("active") @db.VarChar(20)
+  viewerCount   Int       @default(0) @map("viewer_count")
+  peakViewers   Int       @default(0) @map("peak_viewers")
+  totalPiGifted BigInt    @default(0) @map("total_pi_gifted")
+  streamKey     String?   @map("stream_key")
+  playbackUrl   String?   @map("playback_url")
+  startedAt     DateTime  @default(now()) @map("started_at")
+  endedAt       DateTime? @map("ended_at")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gifts         LiveGift[]
+
+  @@map("live_streams")
+}
+
+model LiveGift {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  streamId     String   @map("stream_id") @db.Uuid
+  senderId     String   @map("sender_id") @db.Uuid
+  amountMicroPi BigInt  @map("amount_micro_pi")
+  animation    String?  @db.VarChar(50)
+  createdAt    DateTime @default(now()) @map("created_at")
+  stream       LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  sender       User     @relation("GiftSender", fields: [senderId], references: [id])
+
+  @@map("live_gifts")
+}
+
+model LeaderboardSnapshot {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  period      String   @db.VarChar(20)
+  periodStart DateTime? @map("period_start") @db.Date
+  category    String   @db.VarChar(30)
+  score       BigInt   @default(0)
+  rank        Int?
+  computedAt  DateTime @default(now()) @map("computed_at")
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@map("leaderboard_snapshots")
+}
+
+model Bounty {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  brandName      String   @map("brand_name") @db.VarChar(200)
+  title          String   @db.VarChar(300)
+  description    String?
+  requirements   String?
+  rewardMicroPi  BigInt   @map("reward_micro_pi")
+  totalBudget    BigInt   @map("total_budget")
+  spentBudget    BigInt   @default(0) @map("spent_budget")
+  maxCompletions Int?     @map("max_completions")
+  deadline       DateTime?
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  submissions    BountySubmission[]
+
+  @@map("bounties")
+}
+
+model BountySubmission {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bountyId   String   @map("bounty_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  videoId    String?  @map("video_id") @db.Uuid
+  status     String   @default("pending") @db.VarChar(20)
+  piAwarded  BigInt   @default(0) @map("pi_awarded")
+  createdAt  DateTime @default(now()) @map("created_at")
+  bounty     Bounty   @relation(fields: [bountyId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+  video      Video?   @relation(fields: [videoId], references: [id])
+
+  @@map("bounty_submissions")
+}

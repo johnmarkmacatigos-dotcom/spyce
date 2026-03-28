@@ -1,0 +1,96 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: spyce
+      POSTGRES_USER: spyce
+      # ⚠️  UPDATE: Change password in production
+      POSTGRES_PASSWORD: spyce_dev_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../database/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spyce"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: spyce
+      # ⚠️  UPDATE: Change password in production
+      RABBITMQ_DEFAULT_PASS: spyce_dev_pass
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  api-gateway:
+    build:
+      context: ../../backend/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://spyce:spyce_dev_pass@postgres:5432/spyce
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://spyce:spyce_dev_pass@rabbitmq:5672
+      # ⚠️  UPDATE: Fill these from your .env
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      PI_API_KEY: ${PI_API_KEY}
+      PI_SERVER_KEY: ${PI_SERVER_KEY}
+      PI_WEBHOOK_SECRET: ${PI_WEBHOOK_SECRET}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-spyce-media-dev}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN}
+      AI_SERVICE_URL: http://ai-service:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../../backend/api-gateway:/app
+      - /app/node_modules
+    command: npm run dev
+
+  ai-service:
+    build:
+      context: ../../backend/ai-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      SPYCE_API_URL: http://api-gateway:4000
+      AI_SERVICE_SECRET: ${AI_SERVICE_SECRET:-dev-secret}
+    volumes:
+      - ../../backend/ai-service:/app
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

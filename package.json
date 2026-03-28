@@ -1,0 +1,32 @@
+{
+  "name": "spyce",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/mobile",
+    "apps/web",
+    "backend/api-gateway",
+    "backend/video-service",
+    "backend/challenge-service",
+    "backend/payment-service",
+    "backend/marketplace-service",
+    "backend/notification-service"
+  ],
+  "scripts": {
+    "mobile": "yarn workspace @spyce/mobile start",
+    "web": "yarn workspace @spyce/web dev",
+    "api": "yarn workspace @spyce/api-gateway dev",
+    "services": "docker-compose -f infrastructure/docker/docker-compose.yml up",
+    "db:migrate": "yarn workspace @spyce/api-gateway prisma migrate dev",
+    "db:seed": "yarn workspace @spyce/api-gateway prisma db seed",
+    "test": "yarn workspaces run test",
+    "lint": "yarn workspaces run lint",
+    "build": "yarn workspaces run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0"
+  }
+}

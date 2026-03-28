@@ -1,0 +1,244 @@
+# =============================================================
+# SPYCE Kubernetes Deployment — AWS EKS
+# ⚠️  UPDATE: Replace all YOUR_* placeholders below
+# Apply with: kubectl apply -f infrastructure/k8s/deployment.yml
+# =============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spyce
+
+---
+# API Gateway Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spyce-api
+  namespace: spyce
+  labels:
+    app: spyce-api
+spec:
+  replicas: 3  # ⚠️  UPDATE: Adjust based on expected load
+  selector:
+    matchLabels:
+      app: spyce-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: spyce-api
+    spec:
+      containers:
+        - name: api
+          # ⚠️  UPDATE: Replace with your ECR image URI
+          image: YOUR_AWS_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/spyce-api:latest
+          ports:
+            - containerPort: 4000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "4000"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: database-url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: redis-url
+            - name: JWT_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: jwt-private-key
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: jwt-public-key
+            - name: PI_SERVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: pi-server-key
+            - name: PI_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: pi-webhook-secret
+            - name: AWS_REGION
+              value: ap-southeast-1  # ⚠️  UPDATE
+            - name: S3_BUCKET_NAME
+              value: spyce-media-prod  # ⚠️  UPDATE
+            - name: CLOUDFRONT_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: cloudfront-domain
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "2Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spyce-api-svc
+  namespace: spyce
+spec:
+  selector:
+    app: spyce-api
+  ports:
+    - port: 4000
+      targetPort: 4000
+  type: ClusterIP
+
+---
+# AI Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spyce-ai
+  namespace: spyce
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spyce-ai
+  template:
+    metadata:
+      labels:
+        app: spyce-ai
+    spec:
+      containers:
+        - name: ai
+          # ⚠️  UPDATE: Replace with your ECR image URI
+          image: YOUR_AWS_ACCOUNT_ID.dkr.ecr.YOUR_REGION.amazonaws.com/spyce-ai:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: SPYCE_API_URL
+              value: http://spyce-api-svc:4000
+            - name: AI_SERVICE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: spyce-secrets
+                  key: ai-service-secret
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          # ⚠️  UPDATE: For GPU-backed pose estimation, add:
+          # nodeSelector:
+          #   node.kubernetes.io/instance-type: g4dn.xlarge
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spyce-ai-svc
+  namespace: spyce
+spec:
+  selector:
+    app: spyce-ai
+  ports:
+    - port: 8001
+      targetPort: 8001
+  type: ClusterIP
+
+---
+# Ingress (ALB)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: spyce-ingress
+  namespace: spyce
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # ⚠️  UPDATE: Your ACM certificate ARN
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:REGION:ACCOUNT:certificate/YOUR_CERT_ID
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+spec:
+  rules:
+    - host: api.spyce.io  # ⚠️  UPDATE: Your API domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spyce-api-svc
+                port:
+                  number: 4000
+
+---
+# HPA — Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: spyce-api-hpa
+  namespace: spyce
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: spyce-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+---
+# Kubernetes Secrets (created separately via kubectl)
+# ⚠️  UPDATE: Run this command to create secrets (do not commit secrets to git):
+#
+# kubectl create secret generic spyce-secrets \
+#   --namespace spyce \
+#   --from-literal=database-url="postgresql://..." \
+#   --from-literal=redis-url="redis://..." \
+#   --from-literal=jwt-private-key="-----BEGIN RSA PRIVATE KEY-----..." \
+#   --from-literal=jwt-public-key="-----BEGIN PUBLIC KEY-----..." \
+#   --from-literal=pi-server-key="YOUR_PI_SERVER_KEY" \
+#   --from-literal=pi-webhook-secret="YOUR_PI_WEBHOOK_SECRET" \
+#   --from-literal=cloudfront-domain="YOUR.cloudfront.net" \
+#   --from-literal=ai-service-secret="YOUR_AI_SECRET"

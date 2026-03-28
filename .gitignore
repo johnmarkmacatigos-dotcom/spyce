@@ -1,0 +1,48 @@
+# Environment files — NEVER commit these
+.env
+.env.local
+.env.production
+.env.staging
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build outputs
+dist/
+build/
+.expo/
+*.apk
+*.ipa
+*.aab
+
+# Prisma
+prisma/generated/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Temp / uploads
+tmp/
+temp/
+/uploads/
+
+# Keys (extra safety net — rely on .env too)
+*.pem
+*.p8
+*.p12
+*.key
+*.cert
