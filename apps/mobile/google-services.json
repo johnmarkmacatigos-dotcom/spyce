@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "896919559395",
+    "project_id": "spyce-app10",
+    "storage_bucket": "spyce-app10.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:896919559395:android:a5f2ed5049baed8bbf39d6",
+        "android_client_info": {
+          "package_name": "io.spyce.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD8Tka0nImxDGkX4PFyVIRWjw0_KZ6XEgs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
