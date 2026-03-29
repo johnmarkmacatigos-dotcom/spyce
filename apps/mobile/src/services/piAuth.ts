@@ -32,7 +32,7 @@ let piSdkInitialized = false;
 export async function initializePiSDK() {
   if (piSdkInitialized) return;
   try {
-    const Pi = await import('@pinetwork-js/sdk').then((m) => m.default);
+    const Pi = await import('@pinetwork-js/minesdk').then((m) => m.default);
     await Pi.init({
       version: '2.0',
       sandbox: __DEV__, // true in dev (testnet), false in production (mainnet)
@@ -61,7 +61,7 @@ export async function authenticateWithPi(): Promise<{
   refreshToken: string;
   user: any;
 }> {
-  const Pi = await import('@pinetwork-js/sdk').then((m) => m.default);
+  const Pi = await import('@pinetwork-js/minesdk').then((m) => m.default);
 
   // Official Pi scopes — 'payments' allows payment requests, 'username' gets Pi username
   const scopes = ['payments', 'username'];
@@ -128,7 +128,7 @@ export async function payWithPi(intent: {
   memo: string;
   metadata: Record<string, any>;
 }): Promise<{ success: boolean; paymentId?: string; txid?: string }> {
-  const Pi = await import('@pinetwork-js/sdk').then((m) => m.default);
+  const Pi = await import('@pinetwork-js/minesdk').then((m) => m.default);
 
   return new Promise((resolve, reject) => {
     // From official docs: paymentData and paymentCallbacks
