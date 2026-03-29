@@ -1,5 +1,5 @@
 FROM node:20-alpine
-RUN apk add --no-cache ffmpeg python3 py3-pip
+RUN apk add --no-cache ffmpeg python3 py3-pip openssl1.1-compat
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
