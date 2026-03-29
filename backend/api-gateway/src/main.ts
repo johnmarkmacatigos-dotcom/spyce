@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
-import compression from 'compression';
+import * as compression from 'compression';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -13,7 +13,7 @@ async function bootstrap() {
 
   // CORS
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
+    origin: process.env.ALLOWED_ORIGINS?.split(',') || ['*'],
     credentials: true,
   });
 
@@ -22,7 +22,7 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
-      forbidNonWhitelisted: true,
+      forbidNonWhitelisted: false,
     }),
   );
 
@@ -30,10 +30,9 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   const port = process.env.PORT || 4000;
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   console.log(`🌶  SPYCE API running on port ${port}`);
-  console.log(`   GraphQL playground: http://localhost:${port}/graphql`);
 }
 
 bootstrap();
