@@ -2,16 +2,7 @@
   "name": "spyce",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "apps/mobile",
-    "apps/web",
-    "backend/api-gateway",
-    "backend/video-service",
-    "backend/challenge-service",
-    "backend/payment-service",
-    "backend/marketplace-service",
-    "backend/notification-service"
-  ],
+
   "scripts": {
     "mobile": "yarn workspace @spyce/mobile start",
     "web": "yarn workspace @spyce/web dev",
