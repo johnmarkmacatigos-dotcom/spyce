@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "nest build",
-    "dev": "nest start --watch",
-    "start": "node dist/main",
-    "test": "jest",
-    "lint": "eslint src",
-    "type-check": "tsc --noEmit",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+  "build": "nest build",
+  "dev": "nest start --watch",
+  "start": "node dist/main.js",
+  "prisma:generate": "./node_modules/.bin/prisma generate",
+  "type-check": "tsc --noEmit",
+  "lint": "eslint src",
+  "test": "jest",
+  "prisma:migrate": "prisma migrate dev",
+  "prisma:studio": "prisma studio"
   },
   "dependencies": {
     "@apollo/server": "^4.10.0",
