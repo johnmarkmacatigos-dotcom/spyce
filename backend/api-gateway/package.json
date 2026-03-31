@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-  "build": "prisma generate && ./node_modules/.bin/nest build",
+  "build": "./node_modules/.bin/prisma generate && ./node_modules/.bin/nest build",
   "dev": "nest start --watch",
   "start": "node dist/main.js",
   "type-check": "tsc --noEmit",
