@@ -27,7 +27,7 @@
     "@nestjs/bull": "^10.1.1",
     "@nestjs/websockets": "^10.3.0",
     "@nestjs/platform-socket.io": "^10.3.0",
-    "@prisma/client": "^5.9.0",
+    "@prisma/client": "5.22.0",
     "apollo-server-express": "^3.13.0",
     "graphql": "^16.8.1",
     "passport": "^0.7.0",
@@ -57,7 +57,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/amqplib": "^0.10.4",
     "@types/compression": "^1.7.5",
-    "prisma": "^5.9.0",
+    "prisma": "5.22.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
