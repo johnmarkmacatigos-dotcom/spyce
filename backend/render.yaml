@@ -1,0 +1,19 @@
+# render.yaml — Render.com auto-deploy config
+# Upload this file inside your /backend folder on GitHub
+# Then on Render: New → Web Service → Connect Repo → It reads this file
+
+services:
+  - type: web
+    name: spyce-api
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # All other env vars must be added manually in Render Dashboard
+      # Go to: Service → Environment → Add Environment Variable
+      # Add: MONGODB_URI, JWT_SECRET, CLOUDINARY_CLOUD_NAME,
+      #      CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET,
+      #      PI_API_KEY, FRONTEND_URL

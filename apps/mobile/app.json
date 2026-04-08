@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "SPYCE",
+    "slug": "spyce",
+    "scheme": "spyce",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0A"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.spyce.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SPYCE needs camera access to record challenge videos",
+        "NSMicrophoneUsageDescription": "SPYCE needs microphone access for video recording",
+        "NSMotionUsageDescription": "SPYCE uses motion sensors to count your steps and verify challenges",
+        "NSPhotoLibraryUsageDescription": "SPYCE needs photo library access to upload videos"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0A"
+      },
+      "package": "com.spyce.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACTIVITY_RECOGNITION",
+        "BODY_SENSORS",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        { "cameraPermission": "Allow SPYCE to access your camera for challenge videos" }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#FF6B2B"
+        }
+      ],
+      "expo-av"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID"
+      },
+      "apiUrl": "https://api.spyce.app",
+      "wsUrl": "wss://api.spyce.app"
+    }
+  }
+}

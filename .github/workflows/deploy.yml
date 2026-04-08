@@ -1,0 +1,134 @@
+name: SPYCE CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # ⚠️  UPDATE: Set these in GitHub repo → Settings → Secrets and Variables → Actions
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+  EKS_CLUSTER: spyce-prod
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: spyce_test
+          POSTGRES_USER: spyce
+          POSTGRES_PASSWORD: test_pass
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/api-gateway/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend/api-gateway
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: backend/api-gateway
+        run: npx prisma generate
+
+      - name: Run type check
+        working-directory: backend/api-gateway
+        run: npm run type-check
+
+      - name: Run lint
+        working-directory: backend/api-gateway
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: backend/api-gateway
+        env:
+          DATABASE_URL: postgresql://spyce:test_pass@localhost:5432/spyce_test
+          REDIS_URL: redis://localhost:6379
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+          JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+        run: npm test
+
+  build-and-push:
+    name: Build & Push Docker Images
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API Gateway
+        run: |
+          docker build -t $ECR_REGISTRY/spyce-api:${{ github.sha }} \
+            -f backend/api-gateway/Dockerfile backend/api-gateway
+          docker push $ECR_REGISTRY/spyce-api:${{ github.sha }}
+          docker tag $ECR_REGISTRY/spyce-api:${{ github.sha }} $ECR_REGISTRY/spyce-api:latest
+          docker push $ECR_REGISTRY/spyce-api:latest
+
+      - name: Build and push AI Service
+        run: |
+          docker build -t $ECR_REGISTRY/spyce-ai:${{ github.sha }} \
+            -f backend/ai-service/Dockerfile backend/ai-service
+          docker push $ECR_REGISTRY/spyce-ai:${{ github.sha }}
+
+  deploy:
+    name: Deploy to EKS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name $EKS_CLUSTER --region ${{ secrets.AWS_REGION }}
+
+      - name: Deploy API Gateway
+        run: |
+          kubectl set image deployment/spyce-api \
+            api=$ECR_REGISTRY/spyce-api:${{ github.sha }}
+          kubectl rollout status deployment/spyce-api --timeout=300s
+
+      - name: Deploy AI Service
+        run: |
+          kubectl set image deployment/spyce-ai \
+            ai=$ECR_REGISTRY/spyce-ai:${{ github.sha }}
+          kubectl rollout status deployment/spyce-ai --timeout=300s
+
+      - name: Run database migrations
+        run: |
+          kubectl exec deployment/spyce-api -- \
+            npx prisma migrate deploy
