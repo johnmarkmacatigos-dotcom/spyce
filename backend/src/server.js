@@ -11,7 +11,10 @@ const mongoose = require('mongoose');
 const app = express();
 
 // ── Security Middleware ──────────────────────────────────────
-app.use(helmet());
+app.use(helmet({
+  frameguard: false,
+  contentSecurityPolicy: false,
+}));
 app.use(cors({
   origin: [
     process.env.FRONTEND_URL || 'http://localhost:5173',
