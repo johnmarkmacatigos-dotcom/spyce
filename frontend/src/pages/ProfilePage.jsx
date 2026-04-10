@@ -31,7 +31,7 @@ export default function ProfilePage() {
     try {
       const [profileRes, videosRes] = await Promise.all([
         api.get(`/users/${targetUsername}`),
-        api.get(`/videos/user/${targetUsername}`),
+        api.get(`/videos/user/${profile?.id}`),
       ]);
       setProfile(profileRes.data.user);
       setVideos(videosRes.data.videos || []);
