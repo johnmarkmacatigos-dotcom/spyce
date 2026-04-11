@@ -26,17 +26,46 @@ export default function ProfilePage() {
     loadProfile();
   }, [targetUsername]);
 
-  const loadProfile = async () => {
+const loadProfile = async () => {
     setLoading(true);
     try {
-      const [profileRes, videosRes] = await Promise.all([
-        api.get(`/users/${targetUsername}`),
-        api.get(`/videos/user/${profile?.id}`),
-      ]);
-      setProfile(profileRes.data.user);
-      setVideos(videosRes.data.videos || []);
-      setIsFollowing(profileRes.data.user.isFollowing);
-      setEditForm({ displayName: profileRes.data.user.displayName, bio: profileRes.data.user.bio });
+      if (isOwnProfile) {
+        const profileData = {
+          id: currentUser._id,
+          piUsername: currentUser.piUsername,
+          displayName: currentUser.displayName || currentUser.piUsername,
+          bio: currentUser.bio || '',
+          avatar: currentUser.avatar || '',
+          followersCount: currentUser.followersCount || 0,
+          followingCount: currentUser.followingCount || 0,
+          videosCount: currentUser.videosCount || 0,
+          totalLikes: currentUser.totalLikes || 0,
+          isVerified: currentUser.isVerified || false,
+          isCreator: currentUser.isCreator || false,
+          isFollowing: false,
+        };
+        setProfile(profileData);
+        setEditForm({
+          displayName: profileData.displayName,
+          bio: profileData.bio,
+        });
+        try {
+          const videosRes = await api.get(`/videos/user/${currentUser._id}`);
+          setVideos(videosRes.data.videos || []);
+        } catch { setVideos([]); }
+      } else {
+        const profileRes = await api.get(`/users/${targetUsername}`);
+        setProfile(profileRes.data.user);
+        setIsFollowing(profileRes.data.user.isFollowing);
+        setEditForm({
+          displayName: profileRes.data.user.displayName,
+          bio: profileRes.data.user.bio,
+        });
+        try {
+          const videosRes = await api.get(`/videos/user/${profileRes.data.user.id}`);
+          setVideos(videosRes.data.videos || []);
+        } catch { setVideos([]); }
+      }
     } catch (err) {
       toast.error('Profile not found');
     } finally {
