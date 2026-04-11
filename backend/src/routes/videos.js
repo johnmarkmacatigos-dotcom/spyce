@@ -311,4 +311,60 @@ router.get('/user/:userId', optionalAuth, async (req, res) => {
   }
 });
 
+// POST /api/videos/save — Save video metadata after direct Cloudinary upload
+router.post('/save', auth, async (req, res) => {
+  try {
+    const {
+      videoUrl, thumbnailUrl, cloudinaryPublicId,
+      duration, description, hashtags, audioTrack, challengeId
+    } = req.body;
+
+    if (!videoUrl) return res.status(400).json({ error: 'videoUrl is required' });
+
+    let parsedHashtags = [];
+    if (hashtags) {
+      try { parsedHashtags = JSON.parse(hashtags); }
+      catch { parsedHashtags = hashtags.split(',').map(h => h.trim().toLowerCase().replace('#', '')).filter(Boolean); }
+    }
+
+    const video = new Video({
+      creator: req.user._id,
+      title: '',
+      description: description || '',
+      hashtags: parsedHashtags,
+      videoUrl,
+      thumbnailUrl: thumbnailUrl || '',
+      cloudinaryPublicId: cloudinaryPublicId || '',
+      duration: parseFloat(duration) || 0,
+      audioTrack: audioTrack || '',
+      status: 'active',
+    });
+
+    if (challengeId) {
+      const Challenge = require('../models/Challenge');
+      const challenge = await Challenge.findById(challengeId);
+      if (challenge && challenge.isActive) {
+        video.challenge = challengeId;
+        video.challengeSubmission = true;
+        if (!parsedHashtags.includes(challenge.hashtag)) video.hashtags.push(challenge.hashtag);
+        challenge.submissions.push(video._id);
+        challenge.participantsCount += 1;
+        await challenge.save();
+        req.user.piEarnings += challenge.rewardPerParticipant;
+        req.user.piBalance += challenge.rewardPerParticipant;
+        req.user.challengesCompleted += 1;
+      }
+    }
+
+    await video.save();
+    req.user.videosCount += 1;
+    await req.user.save();
+
+    res.status(201).json({ success: true, video: { id: video._id, videoUrl: video.videoUrl } });
+  } catch (err) {
+    console.error('Save video error:', err);
+    res.status(500).json({ error: err.message || 'Failed to save video' });
+  }
+});
+
 module.exports = router;
