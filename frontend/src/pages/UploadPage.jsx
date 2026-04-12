@@ -340,11 +340,17 @@ export default function UploadPage() {
         thumbnailUrl: cData.eager?.[0]?.secure_url ||
           cData.secure_url.replace('/upload/','/upload/so_1,f_jpg/').replace('.mp4','.jpg'),
         cloudinaryPublicId: cData.public_id,
-        duration: cData.duration || 0,
+        duration: edits?.trimEnd
+          ? (edits.trimEnd - (edits.trimStart || 0))
+          : (cData.duration || 0),
         description, hashtags,
         audioTrack: selectedTrack
           ? `${selectedTrack.trackName} — ${selectedTrack.artistName}` : '',
         challengeId: linkChallenge && challenge ? challenge._id : null,
+        trimStart: edits?.trimStart || 0,
+        trimEnd: edits?.trimEnd || cData.duration || 0,
+        videoVolume: edits?.videoVolume ?? 80,
+        musicVolume: edits?.musicVolume ?? 70,
       });
       setProgress(100);
       toast.success('Video posted! 🌶️', {id:'upload'});
@@ -485,7 +491,12 @@ export default function UploadPage() {
         </div>
         <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFile} style={{display:'none'}}/>
         {file && preview && (
-          <VideoEditor videoSrc={preview} onEditsChange={setEdits} edits={edits}/>
+          <VideoEditor
+            videoSrc={preview}
+            selectedTrack={selectedTrack}
+            onEditsChange={setEdits}
+            edits={edits}
+          />
         )}
 
         {/* Challenge */}
