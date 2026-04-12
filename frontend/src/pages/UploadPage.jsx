@@ -166,6 +166,7 @@ export default function UploadPage() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState('');
+  const [edits, setEdits] = useState({ texts: [], stickers: [], filter: null });
 
   // Music state
   const [showMusic, setShowMusic] = useState(false);
@@ -483,6 +484,9 @@ export default function UploadPage() {
           )}
         </div>
         <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFile} style={{display:'none'}}/>
+        {file && preview && (
+          <VideoEditor videoSrc={preview} onEditsChange={setEdits} edits={edits}/>
+        )}
 
         {/* Challenge */}
         {challenge && (
