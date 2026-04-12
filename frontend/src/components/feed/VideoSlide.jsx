@@ -240,12 +240,6 @@ export default function VideoSlide({ video, isActive, index }) {
           color="var(--pi-gold)"
         />
 
-        {/* Audio mixer button */}
-        <ActionBtn
-          icon="🎛️"
-          count="Mix"
-          onClick={() => setShowAudioMixer(true)}
-        />
 
         {/* Mute */}
         <button onClick={() => setIsMuted(m => !m)} style={{ fontSize:'20px', opacity:0.8 }}>
