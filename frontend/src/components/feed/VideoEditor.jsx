@@ -6,7 +6,6 @@
 // ============================================================
 import React, { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
-import VideoEditor from '../components/feed/VideoEditor';
 
 const STICKERS = ['🔥','💯','🌶️','❤️','😂','👑','✨','🎉','💪','🙌','👀','💀','🫶','⚡','🌟','🤩','😍','🥹','🫡','💥'];
 
