@@ -7,32 +7,18 @@
     <meta name="description" content="SPYCE — Short videos, daily challenges, Pi-powered rewards and marketplace" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-
-    <!-- Open Graph -->
     <meta property="og:title" content="SPYCE — Earn Pi While Creating" />
     <meta property="og:description" content="Short videos + Daily Challenges + Pi Rewards + Marketplace" />
     <meta property="og:type" content="website" />
-
     <title>SPYCE 🌶️</title>
-
-    <!-- ✅ Pi Network SDK — REQUIRED for Pi Browser integration -->
     <script src="https://sdk.minepi.com/pi-sdk.js"></script>
     <script>
-      // Initialize Pi SDK
-      // sandbox: true = testnet/development | false = mainnet/production
-      // ⚠️ IMPORTANT: Change sandbox to false when going to Mainnet
       Pi.init({
         version: "2.0",
         sandbox: window.location.hostname !== 'spyce-api-gateway.vercel.app'
-        // ↑ REPLACE 'YOUR_PRODUCTION_DOMAIN.vercel.app' with your actual Vercel domain
-        // This auto-sets sandbox=false in production and sandbox=true everywhere else
       });
     </script>
-
-    <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json" />
-
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">

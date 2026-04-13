@@ -1,9 +1,10 @@
 // ============================================================
-// SPYCE - VideoEditor v2 — COMPLETE FILE
-// Trim, Audio Mixer, Text, Stickers, Filters
+// SPYCE - VideoEditor v3
+// FIXED: Trim sliders work (loads duration properly)
+// NEW: Draggable text and stickers (touch + mouse)
 // FILE: frontend/src/components/feed/VideoEditor.jsx
 // ============================================================
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 
 const STICKERS = ['🔥','💯','🌶️','❤️','😂','👑','✨','🎉','💪','🙌','👀','💀','🫶','⚡','🌟','🤩','😍','🥹','🫡','💥'];
@@ -22,8 +23,84 @@ const FILTERS = [
 const TEXT_COLORS = ['#ffffff','#ff3c5f','#f0a500','#4ade80','#60a5fa','#f472b6','#000000'];
 const TEXT_SIZES = [16, 20, 24, 32];
 
+// ── Draggable overlay item ────────────────────────────────────
+function DraggableItem({ item, containerRef, onMove, onRemove, children }) {
+  const itemRef = useRef(null);
+  const dragging = useRef(false);
+  const startPos = useRef({ x: 0, y: 0 });
+  const startItem = useRef({ x: 0, y: 0 });
+
+  const getPos = (e) => {
+    const touch = e.touches?.[0] || e;
+    return { x: touch.clientX, y: touch.clientY };
+  };
+
+  const onStart = useCallback((e) => {
+    if (e.target.closest('[data-remove]')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragging.current = true;
+    const pos = getPos(e);
+    startPos.current = pos;
+    startItem.current = { x: item.x, y: item.y };
+  }, [item.x, item.y]);
+
+  const onMove_ = useCallback((e) => {
+    if (!dragging.current) return;
+    e.preventDefault();
+    const pos = getPos(e);
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const dx = ((pos.x - startPos.current.x) / rect.width) * 100;
+    const dy = ((pos.y - startPos.current.y) / rect.height) * 100;
+    const newX = Math.max(5, Math.min(95, startItem.current.x + dx));
+    const newY = Math.max(5, Math.min(95, startItem.current.y + dy));
+    onMove(item.id, newX, newY);
+  }, [item.id, onMove, containerRef]);
+
+  const onEnd = useCallback(() => { dragging.current = false; }, []);
+
+  return (
+    <div
+      ref={itemRef}
+      onMouseDown={onStart}
+      onMouseMove={onMove_}
+      onMouseUp={onEnd}
+      onTouchStart={onStart}
+      onTouchMove={onMove_}
+      onTouchEnd={onEnd}
+      style={{
+        position: 'absolute',
+        top: `${item.y}%`,
+        left: `${item.x}%`,
+        transform: 'translate(-50%, -50%)',
+        cursor: 'grab',
+        userSelect: 'none',
+        touchAction: 'none',
+        zIndex: 10,
+      }}
+    >
+      {children}
+      <button
+        data-remove="true"
+        onClick={(e) => { e.stopPropagation(); onRemove(item.id); }}
+        style={{
+          position: 'absolute', top: '-10px', right: '-10px',
+          width: '20px', height: '20px', borderRadius: '50%',
+          background: 'rgba(255,0,0,0.8)', color: 'white',
+          border: 'none', cursor: 'pointer', fontSize: '11px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          lineHeight: 1, zIndex: 11,
+        }}
+      >✕</button>
+    </div>
+  );
+}
+
 export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, edits }) {
   const videoRef = useRef(null);
+  const previewRef = useRef(null); // container for overlay items
   const trimVideoRef = useRef(null);
 
   const [activeTab, setActiveTab] = useState(null);
@@ -39,31 +116,53 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
   const [musicVolume, setMusicVolume] = useState(edits?.musicVolume ?? 70);
   const [musicMuted, setMusicMuted] = useState(false);
 
-  // Trim
-  const [duration, setDuration] = useState(0);
-  const [trimStart, setTrimStart] = useState(edits?.trimStart || 0);
-  const [trimEnd, setTrimEnd] = useState(0);
+  // Trim — key fix: use null until loaded
+  const [duration, setDuration] = useState(null);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [trimPlaying, setTrimPlaying] = useState(false);
   const [trimApplied, setTrimApplied] = useState(false);
+  const [loadingDuration, setLoadingDuration] = useState(true);
 
+  // Load duration when tab opens
   useEffect(() => {
+    if (activeTab !== 'trim') return;
     const v = trimVideoRef.current;
     if (!v) return;
-    const onLoad = () => {
-      setDuration(v.duration);
-      setTrimEnd(v.duration);
+
+    setLoadingDuration(true);
+
+    const tryLoad = () => {
+      if (v.duration && !isNaN(v.duration) && v.duration > 0) {
+        setDuration(v.duration);
+        setTrimEnd(v.duration);
+        setLoadingDuration(false);
+      }
     };
-    v.addEventListener('loadedmetadata', onLoad);
-    return () => v.removeEventListener('loadedmetadata', onLoad);
-  }, [videoSrc]);
+
+    if (v.readyState >= 1 && v.duration > 0) {
+      tryLoad();
+    } else {
+      v.load();
+      v.addEventListener('loadedmetadata', tryLoad);
+      v.addEventListener('durationchange', tryLoad);
+    }
+
+    return () => {
+      v.removeEventListener('loadedmetadata', tryLoad);
+      v.removeEventListener('durationchange', tryLoad);
+    };
+  }, [activeTab, videoSrc]);
 
   useEffect(() => {
     const v = trimVideoRef.current;
     if (!v || !trimPlaying) return;
     const onTime = () => {
       setCurrentTime(v.currentTime);
-      if (v.currentTime >= trimEnd) { v.currentTime = trimStart; }
+      if (trimEnd && v.currentTime >= trimEnd) {
+        v.currentTime = trimStart;
+      }
     };
     v.addEventListener('timeupdate', onTime);
     return () => v.removeEventListener('timeupdate', onTime);
@@ -73,33 +172,59 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
     if (videoRef.current) videoRef.current.volume = videoVolume / 100;
   }, [videoVolume]);
 
-  const notify = (extra = {}) => {
-    onEditsChange?.({ texts, stickers, filter, videoVolume, musicVolume, musicMuted, trimStart, trimEnd: trimEnd || duration, ...extra });
-  };
+  const notify = useCallback((extra = {}) => {
+    onEditsChange?.({
+      texts, stickers, filter,
+      videoVolume, musicVolume, musicMuted,
+      trimStart, trimEnd: trimEnd || duration || 0,
+      ...extra
+    });
+  }, [texts, stickers, filter, videoVolume, musicVolume, musicMuted, trimStart, trimEnd, duration]);
 
+  // Text
   const addText = () => {
     if (!textInput.trim()) return;
-    const t = [...texts, { id: Date.now(), text: textInput, color: textColor, size: textSize, x: 20, y: 40 }];
+    const t = [...texts, { id: Date.now(), text: textInput, color: textColor, size: textSize, x: 50, y: 50 }];
     setTexts(t); setTextInput(''); notify({ texts: t }); setActiveTab(null);
-    toast.success('Text added!');
+    toast.success('Text added! Drag to move it.');
   };
 
-  const removeText = (id) => { const t = texts.filter(x => x.id !== id); setTexts(t); notify({ texts: t }); };
+  const removeText = useCallback((id) => {
+    const t = texts.filter(x => x.id !== id);
+    setTexts(t); notify({ texts: t });
+  }, [texts, notify]);
 
+  const moveText = useCallback((id, x, y) => {
+    setTexts(prev => {
+      const updated = prev.map(t => t.id === id ? { ...t, x, y } : t);
+      return updated;
+    });
+  }, []);
+
+  // Stickers
   const addSticker = (emoji) => {
-    const s = [...stickers, { id: Date.now(), emoji, x: 20 + Math.random() * 60, y: 20 + Math.random() * 60 }];
-    setStickers(s); notify({ stickers: s }); toast.success(`${emoji} added!`);
+    const s = [...stickers, { id: Date.now(), emoji, x: 50, y: 50 }];
+    setStickers(s); notify({ stickers: s });
+    toast.success(`${emoji} added! Drag to move it.`);
   };
 
-  const removeSticker = (id) => { const s = stickers.filter(x => x.id !== id); setStickers(s); notify({ stickers: s }); };
+  const removeSticker = useCallback((id) => {
+    const s = stickers.filter(x => x.id !== id);
+    setStickers(s); notify({ stickers: s });
+  }, [stickers, notify]);
+
+  const moveSticker = useCallback((id, x, y) => {
+    setStickers(prev => prev.map(s => s.id === id ? { ...s, x, y } : s));
+  }, []);
 
   const selectFilter = (f) => { setFilter(f); notify({ filter: f }); };
 
   const applyTrim = () => {
-    const d = trimEnd - trimStart;
+    if (!duration) { toast.error('Video still loading, please wait'); return; }
+    const d = (trimEnd || duration) - trimStart;
     if (d < 1) { toast.error('Trim must be at least 1 second'); return; }
     setTrimApplied(true);
-    notify({ trimStart, trimEnd });
+    notify({ trimStart, trimEnd: trimEnd || duration });
     toast.success(`✂️ Trimmed to ${d.toFixed(1)}s`);
     setActiveTab(null);
   };
@@ -111,7 +236,10 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
     else { v.pause(); setTrimPlaying(false); }
   };
 
-  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const fmt = (s) => {
+    if (!s && s !== 0) return '0:00';
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  };
 
   const TABS = [
     { id:'trim',     icon:'✂️', label:'Trim' },
@@ -121,52 +249,73 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
     { id:'filters',  icon:'✨', label:'Effects' },
   ];
 
+  const effectiveTrimEnd = trimEnd || duration || 0;
+  const effectiveDuration = duration || 1;
+
   return (
     <div style={{ width: '100%' }}>
 
-      {/* Preview */}
-      <div style={{
-        position: 'relative', width: '100%', height: '200px',
-        borderRadius: '16px', overflow: 'hidden', background: '#000',
-      }}>
+      {/* Preview with draggable overlays */}
+      <div
+        ref={previewRef}
+        style={{
+          position: 'relative', width: '100%', height: '200px',
+          borderRadius: '16px', overflow: 'hidden', background: '#000',
+        }}
+      >
         <video ref={videoRef} src={videoSrc} muted={videoVolume === 0} playsInline autoPlay loop
           style={{ width: '100%', height: '100%', objectFit: 'cover', ...filter.style }}
         />
+
+        {/* Draggable text overlays */}
         {texts.map(t => (
-          <div key={t.id} onClick={() => removeText(t.id)} style={{
-            position: 'absolute', top: `${t.y}%`, left: `${t.x}%`,
-            transform: 'translate(-50%,-50%)',
-            color: t.color, fontSize: `${t.size}px`,
-            fontFamily: 'var(--font-display)', fontWeight: 800,
-            textShadow: '1px 2px 8px rgba(0,0,0,0.8)',
-            cursor: 'pointer', userSelect: 'none',
-            padding: '4px 8px', background: 'rgba(0,0,0,0.2)',
-            borderRadius: '6px', backdropFilter: 'blur(2px)', whiteSpace: 'nowrap',
-          }}>{t.text}</div>
+          <DraggableItem key={t.id} item={t} containerRef={previewRef} onMove={moveText} onRemove={removeText}>
+            <div style={{
+              color: t.color, fontSize: `${t.size}px`,
+              fontFamily: 'var(--font-display)', fontWeight: 800,
+              textShadow: '1px 2px 8px rgba(0,0,0,0.8)',
+              padding: '4px 8px',
+              background: 'rgba(0,0,0,0.2)',
+              borderRadius: '6px',
+              backdropFilter: 'blur(2px)',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}>{t.text}</div>
+          </DraggableItem>
         ))}
+
+        {/* Draggable sticker overlays */}
         {stickers.map(s => (
-          <div key={s.id} onClick={() => removeSticker(s.id)} style={{
-            position: 'absolute', top: `${s.y}%`, left: `${s.x}%`,
-            transform: 'translate(-50%,-50%)',
-            fontSize: '32px', cursor: 'pointer', userSelect: 'none',
-            filter: 'drop-shadow(1px 2px 4px rgba(0,0,0,0.5))',
-          }}>{s.emoji}</div>
+          <DraggableItem key={s.id} item={s} containerRef={previewRef} onMove={moveSticker} onRemove={removeSticker}>
+            <div style={{
+              fontSize: '32px',
+              filter: 'drop-shadow(1px 2px 4px rgba(0,0,0,0.5))',
+              pointerEvents: 'none',
+              lineHeight: 1,
+            }}>{s.emoji}</div>
+          </DraggableItem>
         ))}
+
+        {/* Trim badge */}
         {trimApplied && (
           <div style={{
             position: 'absolute', top: '10px', left: '10px',
             background: 'rgba(255,60,95,0.85)', borderRadius: '8px',
             padding: '3px 10px', fontSize: '0.7rem', color: 'white', fontWeight: 700,
-          }}>✂️ {fmt(trimStart)} – {fmt(trimEnd)}</div>
+            pointerEvents: 'none',
+          }}>✂️ {fmt(trimStart)}–{fmt(effectiveTrimEnd)}</div>
         )}
-        {(texts.length > 0 || stickers.length > 0) && (
+
+        {/* Drag hint */}
+        {(texts.length > 0 || stickers.length > 0) && !trimApplied && (
           <div style={{
             position: 'absolute', bottom: '8px', left: '50%',
             transform: 'translateX(-50%)',
-            background: 'rgba(0,0,0,0.5)', borderRadius: '10px',
+            background: 'rgba(0,0,0,0.6)', borderRadius: '10px',
             padding: '3px 10px', fontSize: '0.65rem',
-            color: 'rgba(255,255,255,0.7)', pointerEvents: 'none',
-          }}>Tap to remove</div>
+            color: 'rgba(255,255,255,0.8)', pointerEvents: 'none',
+            whiteSpace: 'nowrap',
+          }}>Drag to move · tap ✕ to remove</div>
         )}
       </div>
 
@@ -187,90 +336,112 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
         ))}
       </div>
 
+      {/* Hidden video for trim duration detection */}
+      <video ref={trimVideoRef} src={videoSrc} style={{ display: 'none' }} preload="metadata" />
+
       {/* ── TRIM ── */}
       {activeTab === 'trim' && (
         <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px' }}>
-          <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '12px', textAlign: 'center' }}>
-            Drag sliders to set start and end points
-          </p>
-          <video ref={trimVideoRef} src={videoSrc} style={{ display: 'none' }} preload="metadata" />
-
-          {/* Timeline */}
-          <div style={{ position: 'relative', height: '40px', background: 'var(--bg-elevated)', borderRadius: '8px', overflow: 'hidden', marginBottom: '12px' }}>
-            <div style={{
-              position: 'absolute', top: 0, bottom: 0,
-              left: `${(trimStart / Math.max(duration, 1)) * 100}%`,
-              width: `${((trimEnd - trimStart) / Math.max(duration, 1)) * 100}%`,
-              background: 'rgba(255,60,95,0.3)', border: '2px solid var(--brand-red)', borderRadius: '4px',
-            }} />
-            {duration > 0 && (
-              <div style={{
-                position: 'absolute', top: 0, bottom: 0,
-                left: `${(currentTime / duration) * 100}%`,
-                width: '2px', background: 'white',
-              }} />
-            )}
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>
-                {duration > 0 ? `Total: ${fmt(duration)}` : 'Loading...'}
-              </span>
+          {loadingDuration ? (
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <div className="animate-spin" style={{ width: '28px', height: '28px', margin: '0 auto 8px', border: '3px solid var(--border)', borderTopColor: 'var(--brand-red)', borderRadius: '50%' }} />
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Loading video duration...</p>
             </div>
-          </div>
+          ) : (
+            <>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '12px', textAlign: 'center' }}>
+                Drag sliders to set start and end · Total: {fmt(duration)}
+              </p>
 
-          {/* Start slider */}
-          <div style={{ marginBottom: '12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                ▶ Start: <strong style={{ color: 'var(--brand-red)' }}>{fmt(trimStart)}</strong>
-              </span>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                Clip: {fmt(trimEnd - trimStart)}
-              </span>
-            </div>
-            <input type="range" min="0" max={Math.max(0, trimEnd - 1)} step="0.1" value={trimStart}
-              onChange={e => {
-                const v = parseFloat(e.target.value);
-                setTrimStart(v);
-                if (trimVideoRef.current) trimVideoRef.current.currentTime = v;
-                notify({ trimStart: v });
-              }}
-              style={{ width: '100%', accentColor: 'var(--brand-red)', height: '4px' }}
-            />
-          </div>
+              {/* Timeline visual */}
+              <div style={{ position: 'relative', height: '40px', background: 'var(--bg-elevated)', borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
+                <div style={{
+                  position: 'absolute', top: 0, bottom: 0,
+                  left: `${(trimStart / effectiveDuration) * 100}%`,
+                  width: `${((effectiveTrimEnd - trimStart) / effectiveDuration) * 100}%`,
+                  background: 'rgba(255,60,95,0.35)',
+                  border: '2px solid var(--brand-red)',
+                  borderRadius: '4px',
+                }} />
+                {duration > 0 && (
+                  <div style={{
+                    position: 'absolute', top: 0, bottom: 0,
+                    left: `${(currentTime / duration) * 100}%`,
+                    width: '2px', background: 'white',
+                    boxShadow: '0 0 4px rgba(255,255,255,0.8)',
+                  }} />
+                )}
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                  <span style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.4)' }}>
+                    {fmt(trimStart)} → {fmt(effectiveTrimEnd)} · clip: {fmt(effectiveTrimEnd - trimStart)}
+                  </span>
+                </div>
+              </div>
 
-          {/* End slider */}
-          <div style={{ marginBottom: '14px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                ⏹ End: <strong style={{ color: 'var(--brand-red)' }}>{fmt(trimEnd)}</strong>
-              </span>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Total: {fmt(duration)}</span>
-            </div>
-            <input type="range" min={trimStart + 1} max={duration} step="0.1" value={trimEnd}
-              onChange={e => {
-                const v = parseFloat(e.target.value);
-                setTrimEnd(v);
-                notify({ trimEnd: v });
-              }}
-              style={{ width: '100%', accentColor: 'var(--brand-red)', height: '4px' }}
-            />
-          </div>
+              {/* Start slider */}
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    ▶ Start: <strong style={{ color: 'var(--brand-red)' }}>{fmt(trimStart)}</strong>
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, effectiveTrimEnd - 1)}
+                  step={0.1}
+                  value={trimStart}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value);
+                    setTrimStart(v);
+                    if (trimVideoRef.current) trimVideoRef.current.currentTime = v;
+                    notify({ trimStart: v });
+                  }}
+                  style={{ width: '100%', accentColor: 'var(--brand-red)', height: '6px', cursor: 'pointer' }}
+                />
+              </div>
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn btn-ghost btn-sm" onClick={toggleTrimPlay} style={{ flex: 1 }}>
-              {trimPlaying ? '⏸ Pause' : '▶ Preview'}
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={applyTrim} style={{ flex: 1 }}>
-              ✂️ Apply Trim
-            </button>
-          </div>
+              {/* End slider */}
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    ⏹ End: <strong style={{ color: 'var(--brand-red)' }}>{fmt(effectiveTrimEnd)}</strong>
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={trimStart + 1}
+                  max={duration}
+                  step={0.1}
+                  value={effectiveTrimEnd}
+                  onChange={e => {
+                    const v = parseFloat(e.target.value);
+                    setTrimEnd(v);
+                    notify({ trimEnd: v });
+                  }}
+                  style={{ width: '100%', accentColor: 'var(--brand-red)', height: '6px', cursor: 'pointer' }}
+                />
+              </div>
 
-          {trimApplied && (
-            <div style={{
-              marginTop: '10px', padding: '8px 12px',
-              background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)',
-              borderRadius: '10px', fontSize: '0.78rem', color: '#4ade80', textAlign: 'center',
-            }}>✓ Trimmed to {fmt(trimEnd - trimStart)} — applied on upload</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="btn btn-ghost btn-sm" onClick={toggleTrimPlay} style={{ flex: 1 }}>
+                  {trimPlaying ? '⏸ Pause' : '▶ Preview'}
+                </button>
+                <button className="btn btn-primary btn-sm" onClick={applyTrim} style={{ flex: 1 }}>
+                  ✂️ Apply Trim
+                </button>
+              </div>
+
+              {trimApplied && (
+                <div style={{
+                  marginTop: '10px', padding: '8px 12px',
+                  background: 'rgba(74,222,128,0.1)',
+                  border: '1px solid rgba(74,222,128,0.3)',
+                  borderRadius: '10px', fontSize: '0.78rem',
+                  color: '#4ade80', textAlign: 'center',
+                }}>✓ Trimmed to {fmt(effectiveTrimEnd - trimStart)} — applied on upload</div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -281,8 +452,6 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
           <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '16px', textAlign: 'center' }}>
             Mix original sound with added music
           </p>
-
-          {/* Video volume */}
           <div style={{ marginBottom: '20px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -291,18 +460,14 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
               </div>
               <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{videoVolume === 0 ? 'Off' : `${videoVolume}%`}</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-              <span style={{ fontSize: '14px', opacity: videoVolume === 0 ? 0.3 : 1 }}>🔇</span>
-              <input type="range" min="0" max="100" value={videoVolume}
-                onChange={e => { const v = parseInt(e.target.value); setVideoVolume(v); if (videoRef.current) videoRef.current.volume = v / 100; notify({ videoVolume: v }); }}
-                style={{ flex: 1, accentColor: 'var(--brand-red)', height: '4px' }}
-              />
-              <span style={{ fontSize: '14px' }}>🔊</span>
-            </div>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <input type="range" min="0" max="100" value={videoVolume}
+              onChange={e => { const v = parseInt(e.target.value); setVideoVolume(v); if (videoRef.current) videoRef.current.volume = v / 100; notify({ videoVolume: v }); }}
+              style={{ width: '100%', accentColor: 'var(--brand-red)', height: '6px', cursor: 'pointer' }}
+            />
+            <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
               {[0, 50, 80, 100].map(v => (
                 <button key={v} onClick={() => { setVideoVolume(v); if (videoRef.current) videoRef.current.volume = v / 100; notify({ videoVolume: v }); }} style={{
-                  flex: 1, padding: '4px', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer',
+                  flex: 1, padding: '5px', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer',
                   background: videoVolume === v ? 'var(--brand-gradient)' : 'var(--bg-elevated)',
                   border: `1px solid ${videoVolume === v ? 'transparent' : 'var(--border)'}`,
                   color: videoVolume === v ? 'white' : 'var(--text-muted)',
@@ -310,35 +475,27 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
               ))}
             </div>
           </div>
-
-          {/* Music volume */}
           {selectedTrack ? (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <img src={selectedTrack.artworkUrl60} alt="" style={{ width: '28px', height: '28px', borderRadius: '6px' }} />
-                  <div>
-                    <p style={{ fontSize: '0.82rem', fontWeight: 600, lineHeight: 1.2 }}>{selectedTrack.trackName}</p>
-                    <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{selectedTrack.artistName}</p>
-                  </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                <img src={selectedTrack.artworkUrl60} alt="" style={{ width: '32px', height: '32px', borderRadius: '6px' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedTrack.trackName}</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{selectedTrack.artistName}</p>
                 </div>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{musicMuted ? 'Off' : `${musicVolume}%`}</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{musicMuted ? 'Off' : `${musicVolume}%`}</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                <span style={{ fontSize: '14px', opacity: musicMuted ? 0.3 : 1 }}>🔇</span>
-                <input type="range" min="0" max="100" value={musicMuted ? 0 : musicVolume} disabled={musicMuted}
-                  onChange={e => { const v = parseInt(e.target.value); setMusicVolume(v); setMusicMuted(false); notify({ musicVolume: v, musicMuted: false }); }}
-                  style={{ flex: 1, accentColor: 'var(--pi-gold)', height: '4px', opacity: musicMuted ? 0.4 : 1 }}
-                />
-                <span style={{ fontSize: '14px' }}>🔊</span>
-              </div>
+              <input type="range" min="0" max="100" value={musicMuted ? 0 : musicVolume} disabled={musicMuted}
+                onChange={e => { const v = parseInt(e.target.value); setMusicVolume(v); setMusicMuted(false); notify({ musicVolume: v, musicMuted: false }); }}
+                style={{ width: '100%', accentColor: 'var(--pi-gold)', height: '6px', cursor: 'pointer', opacity: musicMuted ? 0.4 : 1, marginBottom: '8px' }}
+              />
               <div style={{ display: 'flex', gap: '6px' }}>
                 {[0, 50, 70, 100].map(v => (
                   <button key={v} onClick={() => {
                     if (v === 0) { setMusicMuted(true); notify({ musicMuted: true }); }
                     else { setMusicVolume(v); setMusicMuted(false); notify({ musicVolume: v, musicMuted: false }); }
                   }} style={{
-                    flex: 1, padding: '4px', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer',
+                    flex: 1, padding: '5px', borderRadius: '8px', fontSize: '0.7rem', cursor: 'pointer',
                     background: (v === 0 ? musicMuted : !musicMuted && musicVolume === v)
                       ? 'linear-gradient(135deg,#f0a500,#ffd166)' : 'var(--bg-elevated)',
                     border: '1px solid var(--border)',
@@ -348,9 +505,9 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
               </div>
             </div>
           ) : (
-            <div style={{ padding: '16px', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: '12px' }}>
-              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '4px' }}>No music added yet</p>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', opacity: 0.7 }}>Use 🎵 music section below to add a track</p>
+            <div style={{ padding: '14px', textAlign: 'center', background: 'var(--bg-elevated)', borderRadius: '12px' }}>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No music added yet</p>
+              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', opacity: 0.7, marginTop: '4px' }}>Use 🎵 section below to add a track</p>
             </div>
           )}
         </div>
@@ -359,16 +516,16 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
       {/* ── TEXT ── */}
       {activeTab === 'text' && (
         <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px' }}>
-          <input placeholder="Add text to your video..." value={textInput}
+          <input placeholder="Type your text..." value={textInput}
             onChange={e => setTextInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && addText()}
             style={{ marginBottom: '10px' }} autoFocus
           />
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Color:</span>
             {TEXT_COLORS.map(c => (
               <button key={c} onClick={() => setTextColor(c)} style={{
-                width: '24px', height: '24px', borderRadius: '50%', background: c, cursor: 'pointer',
+                width: '26px', height: '26px', borderRadius: '50%', background: c, cursor: 'pointer',
                 border: textColor === c ? '3px solid white' : '2px solid rgba(255,255,255,0.2)',
                 boxShadow: c === '#ffffff' ? '0 0 0 1px rgba(0,0,0,0.3)' : 'none',
               }} />
@@ -378,7 +535,7 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Size:</span>
             {TEXT_SIZES.map(s => (
               <button key={s} onClick={() => setTextSize(s)} style={{
-                padding: '4px 10px', borderRadius: '8px', cursor: 'pointer',
+                padding: '5px 12px', borderRadius: '8px', cursor: 'pointer',
                 background: textSize === s ? 'var(--brand-gradient)' : 'var(--bg-elevated)',
                 border: textSize === s ? 'none' : '1px solid var(--border)',
                 color: textSize === s ? 'white' : 'var(--text-secondary)',
@@ -386,14 +543,18 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
               }}>A</button>
             ))}
           </div>
-          <button className="btn btn-primary btn-sm" onClick={addText} style={{ width: '100%' }}>Add Text</button>
+          <button className="btn btn-primary btn-sm" onClick={addText} style={{ width: '100%' }}>
+            Add Text (drag to position)
+          </button>
         </div>
       )}
 
       {/* ── STICKERS ── */}
       {activeTab === 'stickers' && (
         <div style={{ marginTop: '10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '14px', padding: '14px' }}>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px' }}>Tap to add</p>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
+            Tap to add · drag to reposition
+          </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
             {STICKERS.map(emoji => (
               <button key={emoji} onClick={() => addSticker(emoji)} style={{
