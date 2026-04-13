@@ -19,7 +19,7 @@ export default function TipModal({ creator, onTip, onClose }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-sheet" onClick={e => e.stopPropagation()}>
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ fontSize: '32px', marginBottom: '8px' }}>🪙</div>
+          <div style={{ fontSize: '32px', marginBottom: '8px' }}>c:\Users\Admin\Downloads\pi.png</div>
           <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem' }}>
             Tip @{creator?.piUsername}
           </h3>
