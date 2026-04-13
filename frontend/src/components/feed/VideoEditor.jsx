@@ -44,8 +44,8 @@ export default function VideoEditor({ videoSrc, selectedTrack, onEditsChange, ed
   const [trimStart, setTrimStart] = useState(edits?.trimStart || 0);
   const [trimEnd, setTrimEnd] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [trimPlaying, setTrimPlaying] = useState(true);
-  const [trimApplied, setTrimApplied] = useState(true);
+  const [trimPlaying, setTrimPlaying] = useState(false);
+  const [trimApplied, setTrimApplied] = useState(false);
 
   useEffect(() => {
     const v = trimVideoRef.current;
