@@ -4,14 +4,18 @@
 const express = require('express');
 const router = express.Router();
 const Challenge = require('../models/Challenge');
-const { auth, optionalAuth } = require('../middleware/auth');
 
-// GET /api/challenges/active — Today's challenge
+// GET /api/challenges/active
 router.get('/active', async (req, res) => {
   try {
-    const challenge = await Challenge.getActive();
+    // First try date-aware active challenge
+    let challenge = await Challenge.getActive();
+    // Fallback: any challenge with isActive: true
     if (!challenge) {
-      return res.json({ challenge: null, message: 'No active challenge today. Check back soon!' });
+      challenge = await Challenge.findOne({ isActive: true });
+    }
+    if (!challenge) {
+      return res.json({ challenge: null, message: 'No active challenge right now.' });
     }
     res.json({ challenge });
   } catch (err) {
@@ -19,7 +23,7 @@ router.get('/active', async (req, res) => {
   }
 });
 
-// GET /api/challenges — All challenges (paginated)
+// GET /api/challenges
 router.get('/', async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -33,7 +37,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/challenges/:id — Single challenge with submissions
+// GET /api/challenges/:id
 router.get('/:id', async (req, res) => {
   try {
     const challenge = await Challenge.findById(req.params.id)
