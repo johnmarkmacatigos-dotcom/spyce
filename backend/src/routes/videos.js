@@ -298,7 +298,7 @@ router.get('/user/:userId', optionalAuth, async (req, res) => {
     const videos = await Video.find({
       creator: req.params.userId,
       status: 'active',
-      isPublic: true,
+      isPublic: { type: Boolean, default: true }
     })
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
@@ -316,7 +316,9 @@ router.post('/save', auth, async (req, res) => {
   try {
     const {
       videoUrl, thumbnailUrl, cloudinaryPublicId,
-      duration, description, hashtags, audioTrack, challengeId
+      duration, description, hashtags, audioTrack,
+      audioTrackUrl, challengeId, trimStart, trimEnd,
+      videoVolume, musicVolume
     } = req.body;
 
     if (!videoUrl) return res.status(400).json({ error: 'videoUrl is required' });

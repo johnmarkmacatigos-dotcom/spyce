@@ -9,6 +9,24 @@ const Video = require('../models/Video');
 const { auth, optionalAuth } = require('../middleware/auth');
 const { imageUpload } = require('../services/cloudinary');
 
+// PUT /api/users/profile — Update own profile
+router.put('/profile', auth, imageUpload.single('avatar'), async (req, res) => {
+  try {
+    const { displayName, bio } = req.body;
+    const updates = {};
+
+    if (displayName) updates.displayName = displayName.trim().slice(0, 50);
+    if (bio !== undefined) updates.bio = bio.slice(0, 150);
+    if (req.file) updates.avatar = req.file.path;
+    if (req.body.avatar) updates.avatar = req.body.avatar;
+
+    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
+    res.json({ success: true, user: user.toPublicProfile() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 // GET /api/users/:username — Public profile
 router.get('/:username', optionalAuth, async (req, res) => {
   try {
@@ -26,23 +44,6 @@ router.get('/:username', optionalAuth, async (req, res) => {
     res.json({ user: { ...user.toPublicProfile(), isFollowing } });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch user' });
-  }
-});
-
-// PUT /api/users/profile — Update own profile
-router.put('/profile', auth, imageUpload.single('avatar'), async (req, res) => {
-  try {
-    const { displayName, bio } = req.body;
-    const updates = {};
-
-    if (displayName) updates.displayName = displayName.trim().slice(0, 50);
-    if (bio !== undefined) updates.bio = bio.slice(0, 150);
-    if (req.file) updates.avatar = req.file.path;
-
-    const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true });
-    res.json({ success: true, user: user.toPublicProfile() });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
