@@ -113,9 +113,15 @@ export default function VideoSlide({ video, isActive }) {
   };
 
   const handleTip = async (amount) => {
-    setShowTip(false);
-    const result = await tipCreator(amount, video.creator._id, video.id);
-    if (result) toast.success(`Tipped ${amount}π! 🎉`);
+    try {
+      const result = await tipCreator(amount, video.creator._id, video.id);
+      if (result) toast.success(`Tipped ${amount}π! 🎉`);
+    } catch (err) {
+      // Tip was cancelled or errored — usePi already shows a toast
+      console.error('Tip flow ended with error:', err);
+    } finally {
+      setShowTip(false); // Always close modal, success or not
+    }
   };
 
   const goToProfile = () => navigate(`/profile/${video.creator?.piUsername}`);

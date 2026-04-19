@@ -111,7 +111,13 @@ export const usePi = () => {
         // Step 2: Blockchain confirmed, complete on our server
         onReadyForServerCompletion: async (paymentId, txid) => {
           try {
-            const { data } = await api.post('/payments/complete', { paymentId, txid });
+            // ✅ FIX: Pass metadata so backend completePayment() can route by type
+            // Without metadata.type the tip was silently swallowed (no branch matched)
+            const { data } = await api.post('/payments/complete', {
+              paymentId,
+              txid,
+              metadata: { type, referenceId, referenceType, toUserId, ...metadata },
+            });
             toast.success('Payment completed! 🎉');
             resolve({ paymentId, txid, ...data });
           } catch (err) {
@@ -135,8 +141,22 @@ export const usePi = () => {
         },
       };
 
-      Pi.createPayment(paymentData, paymentCallbacks)
-        .catch(reject);
+      // ANDROID FIX: On some Android Pi Browser versions, Pi.createPayment()
+      // returns undefined instead of a Promise. Calling .catch() on undefined
+      // throws a TypeError which rejects the whole promise, leaving loading=true
+      // forever and making the Send button disappear silently.
+      // Solution: guard with optional chaining and wrap in try/catch.
+      try {
+        const result = Pi.createPayment(paymentData, paymentCallbacks);
+        if (result && typeof result.catch === 'function') {
+          result.catch(reject);
+        }
+        // If result is undefined (older Android Pi Browser), the callbacks
+        // still fire correctly — we just don't need to chain .catch()
+      } catch (err) {
+        console.error('Pi.createPayment() threw synchronously:', err);
+        reject(err);
+      }
     });
   }, []);
 

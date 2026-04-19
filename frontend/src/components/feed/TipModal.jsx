@@ -18,8 +18,16 @@ export default function TipModal({ creator, onTip, onClose }) {
   const handleSend = async () => {
     if (!amount || amount <= 0) return;
     setLoading(true);
-    await onTip(amount);
-    setLoading(false);
+    try {
+      await onTip(amount);
+    } catch (err) {
+      // ANDROID FIX: Without this catch, any rejection from onTip() (e.g. Pi SDK
+      // error) leaves loading=true permanently, making the buttons disappear.
+      console.error('Tip failed:', err);
+    } finally {
+      // Always reset loading so buttons are never permanently hidden
+      setLoading(false);
+    }
   };
 
   return (

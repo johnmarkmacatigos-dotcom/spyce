@@ -60,7 +60,9 @@ app.use('/api/marketplace',require('./routes/marketplace'));
 app.use('/api/payments',   paymentLimiter, require('./routes/payments'));
 app.use('/api/feed',       require('./routes/feed'));
 app.use('/api/earnings',   require('./routes/earnings'));
-app.use('/api/admin',    require('./routes/admin'));
+app.use('/api/admin',      require('./routes/admin'));
+// Music search proxy — avoids CORS issues in Pi Browser
+app.use('/api/music',      require('./routes/music'));
 
 // ── Health Check ─────────────────────────────────────────────
 app.get('/health', (req, res) => {

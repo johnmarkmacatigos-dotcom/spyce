@@ -47,11 +47,57 @@ export default function CommentsDrawer({ videoId, onClose }) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    /*
+     * iOS FIX: The modal-overlay div was capturing ALL touch events across the
+     * full screen including over the sheet. On iOS, when the keyboard opens the
+     * visual viewport shrinks but the overlay's hit-test area stays full-screen,
+     * making the input and send button completely untouchable.
+     *
+     * Solution: Split the overlay into two layers:
+     *   1. A backdrop div (pointer-events only outside the sheet)
+     *   2. The sheet itself with its own positioning
+     * The sheet uses pointer-events:all explicitly, and the backdrop sits behind.
+     */
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+      }}
+    >
+      {/* Backdrop — only captures taps outside the sheet */}
       <div
-        className="modal-sheet"
+        onClick={onClose}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 0,
+        }}
+      />
+      <div
         onClick={e => e.stopPropagation()}
-        style={{ maxHeight: '75dvh', display: 'flex', flexDirection: 'column', padding: 0 }}
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          width: '100%',
+          maxWidth: '480px',
+          maxHeight: '75dvh',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: 0,
+          background: 'var(--bg-secondary)',
+          borderRadius: '24px 24px 0 0',
+          animation: 'slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+          // iOS fix: allow sheet to shrink when keyboard appears
+          // without this the sheet clips and input goes offscreen
+          WebkitOverflowScrolling: 'touch',
+          pointerEvents: 'all',
+        }}
       >
         {/* Header */}
         <div style={{
@@ -91,8 +137,14 @@ export default function CommentsDrawer({ videoId, onClose }) {
         {/* Input */}
         <div style={{
           padding: '12px 16px',
+          paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))',
           borderTop: '1px solid var(--border)',
           display: 'flex', gap: '10px', alignItems: 'center',
+          // ✅ FIX: Stick to bottom even when keyboard appears on Pi Browser
+          position: 'sticky',
+          bottom: 0,
+          background: 'var(--bg-secondary)',
+          zIndex: 10,
         }}>
           <input
             ref={inputRef}
@@ -100,7 +152,18 @@ export default function CommentsDrawer({ videoId, onClose }) {
             onChange={e => setText(e.target.value)}
             placeholder="Add a comment..."
             onKeyDown={e => e.key === 'Enter' && postComment()}
-            style={{ flex: 1, borderRadius: '50px', padding: '10px 16px', fontSize: '0.88rem' }}
+            // ✅ FIX: Explicit styles ensure input is visible & tappable in Pi Browser
+            style={{
+              flex: 1,
+              borderRadius: '50px',
+              padding: '10px 16px',
+              fontSize: '0.88rem',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-primary)',
+              outline: 'none',
+              WebkitAppearance: 'none',  // Prevents iOS default styling override
+            }}
             maxLength={200}
           />
           <button
