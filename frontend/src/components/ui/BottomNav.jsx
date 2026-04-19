@@ -63,7 +63,7 @@ export default function BottomNav() {
         active={isActive('/challenge')}
         onClick={() => navigate('/challenge')}
       />
-
+ 
       {/* Profile — shows user avatar */}
       <button
         onClick={() => navigate('/profile')}
