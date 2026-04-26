@@ -10,6 +10,7 @@ import api from '../utils/api';
 import toast from 'react-hot-toast';
 import VideoEditor from '../components/feed/VideoEditor';
 import { trimVideoFile, canTrimInBrowser, formatFileSize } from '../utils/VideoTrimmer';
+import VideoSourcePicker from '../components/ui/VideoSourcePicker';
 
 const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
@@ -110,6 +111,10 @@ export default function UploadPage() {
   const [progress, setProgress] = useState(0);
   const [uploadStage, setUploadStage] = useState(''); // 'trimming'|'cloudinary'|'saving'
   const [uploadError, setUploadError] = useState('');
+  const [showSourcePicker, setShowSourcePicker] = useState(false);
+  const libraryInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const filesInputRef = useRef(null);
 
   // Edits from VideoEditor
   const [edits, setEdits] = useState({
@@ -234,6 +239,12 @@ export default function UploadPage() {
     xhrRef.current?.abort();
     setFile(null); setTrimmedFile(null); setPreview('');
     setProgress(0); setUploading(false); setUploadError('');
+  };
+
+  const handleSourceSelect = (source) => {
+    if (source === 'library') libraryInputRef.current?.click();
+    else if (source === 'camera') cameraInputRef.current?.click();
+    else if (source === 'files') filesInputRef.current?.click();
   };
 
   const playPreview = (track) => {
@@ -410,7 +421,7 @@ export default function UploadPage() {
         )}
 
         {/* Video picker */}
-        <div onClick={()=>!file&&!uploading&&fileInputRef.current?.click()} style={{ position:'relative', width:'100%', height:file?'220px':'180px', borderRadius:'20px', overflow:'hidden', border:`1.5px solid ${file?'rgba(255,60,95,0.45)':'rgba(255,255,255,0.07)'}`, cursor:file?'default':'pointer', background:'#080810', transition:'height 0.4s cubic-bezier(0.34,1.56,0.64,1)', boxShadow:file?'0 8px 40px rgba(255,60,95,0.12)':'none' }}>
+        <div onClick={() => !file && !uploading && setShowSourcePicker(true)} style={{ position:'relative', width:'100%', height:file?'220px':'180px', borderRadius:'20px', overflow:'hidden', border:`1.5px solid ${file?'rgba(255,60,95,0.45)':'rgba(255,255,255,0.07)'}`, cursor:file?'default':'pointer', background:'#080810', transition:'height 0.4s cubic-bezier(0.34,1.56,0.64,1)', boxShadow:file?'0 8px 40px rgba(255,60,95,0.12)':'none' }}>
           {!file ? (
             <>
               <canvas ref={canvasRef} style={{ position:'absolute', inset:0, width:'100%', height:'100%' }}/>
@@ -442,7 +453,17 @@ export default function UploadPage() {
             </>
           )}
         </div>
-        <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFile} style={{ display:'none' }}/>
+        {/* 3 separate inputs for each source — works on both iOS and Android */}
+        <input ref={libraryInputRef} type="file" accept="video/*" onChange={handleFile} style={{display:'none'}}/>
+        <input ref={cameraInputRef} type="file" accept="video/*" capture="environment" onChange={handleFile} style={{display:'none'}}/>
+        <input ref={filesInputRef} type="file" accept="video/*,*/*" onChange={handleFile} style={{display:'none'}}/>
+
+        {showSourcePicker && (
+          <VideoSourcePicker
+            onClose={() => setShowSourcePicker(false)}
+            onSelect={handleSourceSelect}
+          />
+        )}
 
         {/* Error display */}
         {uploadError && (
