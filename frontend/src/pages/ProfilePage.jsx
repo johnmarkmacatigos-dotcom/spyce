@@ -1,6 +1,7 @@
 // ============================================================
-// SPYCE - ProfilePage v3
-// FIXED: Shows uploaded videos, delete option, avatar upload
+// SPYCE - ProfilePage v4
+// FIXED: Sell button navigates to Marketplace sell tab
+// FIXED: Avatar upload, videos display, delete video
 // FILE: frontend/src/pages/ProfilePage.jsx
 // ============================================================
 import React, { useState, useEffect, useRef } from 'react';
@@ -47,6 +48,7 @@ export default function ProfilePage() {
           followingCount: currentUser.followingCount || 0,
           videosCount: currentUser.videosCount || 0,
           isVerified: currentUser.isVerified || false,
+          isCreator: currentUser.isCreator || false,
         });
         setEditForm({
           displayName: currentUser.displayName || currentUser.piUsername,
@@ -71,15 +73,13 @@ export default function ProfilePage() {
   const loadVideos = async (userId) => {
     setVideosLoading(true);
     try {
-      // Try user-specific endpoint first
       const { data } = await api.get(`/videos/user/${userId}`);
       setVideos(data.videos || []);
     } catch {
       try {
-        // Fallback: get all videos and filter by creator
         const { data } = await api.get(`/feed?limit=50`);
-        const userVideos = (data.videos || []).filter(v =>
-          v.creator?._id === userId || v.creator?.id === userId
+        const userVideos = (data.videos || []).filter(
+          v => v.creator?._id === userId || v.creator?.id === userId
         );
         setVideos(userVideos);
       } catch {
@@ -90,7 +90,7 @@ export default function ProfilePage() {
     }
   };
 
-  // Avatar upload directly to Cloudinary
+  // Upload avatar directly to Cloudinary
   const handleAvatarChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -99,37 +99,24 @@ export default function ProfilePage() {
 
     setAvatarUploading(true);
     try {
-      let avatarUrl = '';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('upload_preset', UPLOAD_PRESET);
+      fd.append('resource_type', 'image');
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        { method: 'POST', body: fd }
+      );
+      const cData = await res.json();
+      const avatarUrl = cData.secure_url;
 
-      if (CLOUD_NAME && UPLOAD_PRESET) {
-        // Upload to Cloudinary directly
-        const fd = new FormData();
-        fd.append('file', file);
-        fd.append('upload_preset', UPLOAD_PRESET);
-        fd.append('resource_type', 'image');
-        const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-          method: 'POST', body: fd,
-        });
-        const cData = await res.json();
-        avatarUrl = cData.secure_url;
-      } else {
-        // Fallback: send file to backend
-        const fd = new FormData();
-        fd.append('avatar', file);
-        const { data } = await api.put('/users/profile', fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        avatarUrl = data.user.avatar;
-      }
+      if (!avatarUrl) throw new Error('Upload failed');
 
-      if (avatarUrl) {
-        // Save URL to backend
-        await api.put('/users/profile', { avatar: avatarUrl });
-        setProfile(p => ({ ...p, avatar: avatarUrl }));
-        updateUser({ avatar: avatarUrl });
-        toast.success('Profile photo updated! 🎉');
-      }
-    } catch (err) {
+      await api.put('/users/profile', { avatar: avatarUrl });
+      setProfile(p => ({ ...p, avatar: avatarUrl }));
+      updateUser({ avatar: avatarUrl });
+      toast.success('Profile photo updated! 📷');
+    } catch {
       toast.error('Failed to update photo');
     } finally {
       setAvatarUploading(false);
@@ -137,16 +124,15 @@ export default function ProfilePage() {
   };
 
   const handleDeleteVideo = async (videoId) => {
-    if (!window.confirm('Delete this video?')) return;
+    if (!window.confirm('Delete this video? This cannot be undone.')) return;
     setDeletingId(videoId);
     try {
       await api.delete(`/videos/${videoId}`);
       setVideos(v => v.filter(x => (x._id || x.id) !== videoId));
-      setProfile(p => ({ ...p, videosCount: Math.max(0, (p.videosCount || 1) - 1) }));
       updateUser({ videosCount: Math.max(0, (currentUser.videosCount || 1) - 1) });
       toast.success('Video deleted');
     } catch {
-      toast.error('Failed to delete video');
+      toast.error('Failed to delete');
     } finally {
       setDeletingId(null);
     }
@@ -154,9 +140,10 @@ export default function ProfilePage() {
 
   const handleFollow = async () => {
     try {
-      const { data } = await api.post(`/users/${profile.id}/follow`);
+      const { data } = await api.post(`/users/${profile.id || profile._id}/follow`);
       setIsFollowing(data.isFollowing);
       setProfile(p => ({ ...p, followersCount: data.followersCount }));
+      toast.success(data.isFollowing ? `Following @${profile.piUsername}` : `Unfollowed`);
     } catch { toast.error('Failed'); }
   };
 
@@ -170,11 +157,11 @@ export default function ProfilePage() {
     } catch { toast.error('Failed to update'); }
   };
 
-  const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : n;
+  const fmt = (n) => n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0);
 
   if (loading) return (
     <div className="page" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="animate-spin" style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--brand-red)', borderRadius: '50%' }} />
+      <div className="animate-spin" style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--brand-red)', borderRadius: '50%' }}/>
     </div>
   );
 
@@ -193,51 +180,36 @@ export default function ProfilePage() {
             {isOwnProfile ? 'My Profile' : `@${profile.piUsername}`}
           </h1>
           {isOwnProfile && (
-            <button onClick={() => { logout(); navigate('/login'); }} style={{ color: 'var(--text-muted)', fontSize: '0.82rem', background: 'none', border: 'none', cursor: 'pointer' }}>
-              Sign out
-            </button>
+            <button onClick={() => { logout(); navigate('/login'); }} style={{ color: 'var(--text-muted)', fontSize: '0.82rem', background: 'none', border: 'none', cursor: 'pointer' }}>Sign out</button>
           )}
         </div>
 
         {/* Avatar + Stats */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '16px' }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div
-              onClick={() => isOwnProfile && avatarInputRef.current?.click()}
-              style={{ cursor: isOwnProfile ? 'pointer' : 'default', position: 'relative' }}
-            >
+            <div onClick={() => isOwnProfile && avatarInputRef.current?.click()} style={{ cursor: isOwnProfile ? 'pointer' : 'default' }}>
               {profile.avatar ? (
-                <img src={profile.avatar} alt="" style={{
-                  width: '80px', height: '80px', borderRadius: '50%',
-                  objectFit: 'cover', border: '3px solid var(--brand-red)',
-                  filter: avatarUploading ? 'brightness(0.5)' : 'none',
-                }} />
+                <img src={profile.avatar} alt="" style={{ width: '80px', height: '80px', borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--brand-red)', filter: avatarUploading ? 'brightness(0.5)' : 'none' }}/>
               ) : (
-                <div style={{
-                  width: '80px', height: '80px', borderRadius: '50%',
-                  background: 'var(--brand-gradient)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: '28px', fontWeight: 800, color: 'white',
-                  border: '3px solid rgba(255,60,95,0.3)',
-                }}>
+                <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'var(--brand-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', fontWeight: 800, color: 'white', border: '3px solid rgba(255,60,95,0.3)' }}>
                   {(profile.displayName || profile.piUsername)[0].toUpperCase()}
                 </div>
               )}
               {avatarUploading && (
                 <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)' }}>
-                  <div className="animate-spin" style={{ width: '24px', height: '24px', border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%' }} />
+                  <div className="animate-spin" style={{ width: '24px', height: '24px', border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%' }}/>
                 </div>
               )}
               {isOwnProfile && !avatarUploading && (
                 <div style={{ position: 'absolute', bottom: 0, right: 0, background: 'var(--brand-gradient)', borderRadius: '50%', width: '26px', height: '26px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', border: '2px solid var(--bg-primary)' }}>📷</div>
               )}
             </div>
-            <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarChange} style={{ display: 'none' }} />
+            <input ref={avatarInputRef} type="file" accept="image/*" onChange={handleAvatarChange} style={{ display: 'none' }}/>
           </div>
 
           <div style={{ flex: 1, display: 'flex', gap: '16px' }}>
             {[
-              [profile.videosCount || videos.length || 0, 'Videos'],
+              [videos.length || profile.videosCount || 0, 'Videos'],
               [profile.followersCount || 0, 'Followers'],
               [profile.followingCount || 0, 'Following'],
             ].map(([val, label]) => (
@@ -252,10 +224,8 @@ export default function ProfilePage() {
         {/* Name + Bio */}
         {editMode ? (
           <div style={{ marginBottom: '16px' }}>
-            <input value={editForm.displayName} onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))}
-              placeholder="Display name" style={{ marginBottom: '8px' }} maxLength={50} />
-            <textarea value={editForm.bio} onChange={e => setEditForm(f => ({ ...f, bio: e.target.value }))}
-              placeholder="Bio..." rows={2} style={{ marginBottom: '12px', resize: 'none' }} maxLength={150} />
+            <input value={editForm.displayName} onChange={e => setEditForm(f => ({...f, displayName: e.target.value}))} placeholder="Display name" style={{ marginBottom: '8px' }} maxLength={50}/>
+            <textarea value={editForm.bio} onChange={e => setEditForm(f => ({...f, bio: e.target.value}))} placeholder="Bio..." rows={2} maxLength={150} style={{ marginBottom: '12px', resize: 'none' }}/>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(false)} style={{ flex: 1 }}>Cancel</button>
               <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} style={{ flex: 2 }}>Save</button>
@@ -266,12 +236,13 @@ export default function ProfilePage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: '1rem' }}>{profile.displayName}</span>
               {profile.isVerified && <span>✅</span>}
+              {profile.isCreator && <span style={{ background: 'var(--brand-gradient)', color: 'white', borderRadius: '6px', padding: '1px 8px', fontSize: '0.65rem', fontWeight: 800 }}>Creator</span>}
             </div>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
               @{profile.piUsername}{profile.bio ? ` · ${profile.bio}` : ''}
             </p>
             {isOwnProfile && (
-              <button onClick={() => avatarInputRef.current?.click()} style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--brand-red)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button onClick={() => avatarInputRef.current?.click()} style={{ marginTop: '6px', fontSize: '0.75rem', color: 'var(--brand-red)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer' }}>
                 📷 Change profile photo
               </button>
             )}
@@ -280,95 +251,78 @@ export default function ProfilePage() {
 
         {/* Pi Earnings */}
         {isOwnProfile && (
-          <div onClick={() => navigate('/earnings')} style={{
-            background: 'rgba(240,165,0,0.08)', border: '1px solid rgba(240,165,0,0.2)',
-            borderRadius: '12px', padding: '12px 16px', marginBottom: '16px',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer',
-          }}>
-            <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>Pi Earnings</span>
+          <div onClick={() => navigate('/earnings')} style={{ background: 'rgba(240,165,0,0.08)', border: '1px solid rgba(240,165,0,0.2)', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}>
+            <span style={{ fontSize: '0.88rem', color: 'var(--text-secondary)' }}>🪙 Pi Earnings</span>
             <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--pi-gold)', fontSize: '0.9rem' }}>View Dashboard →</span>
           </div>
         )}
 
-        {/* Action buttons */}
+        {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
           {isOwnProfile ? (
             <>
               <button className="btn btn-ghost" onClick={() => setEditMode(true)} style={{ flex: 1 }}>✏️ Edit Profile</button>
-              <button className="btn btn-ghost btn-sm" onClick={() => navigate('/marketplace/new')}>+ Sell</button>
+              {/* FIXED: Navigate to marketplace sell tab */}
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => navigate('/marketplace?mode=sell')}
+                style={{ flexShrink: 0 }}
+              >
+                🛍️ Sell
+              </button>
             </>
           ) : (
             <button className={`btn ${isFollowing ? 'btn-ghost' : 'btn-primary'}`} onClick={handleFollow} style={{ flex: 1 }}>
-              {isFollowing ? 'Following ✓' : 'Follow'}
+              {isFollowing ? 'Following ✓' : '+ Follow'}
             </button>
           )}
         </div>
 
         {/* Videos Grid */}
-        <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '12px', fontSize: '0.95rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span>Videos {videos.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({videos.length})</span>}</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '0.95rem' }}>
+            Videos {videos.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({videos.length})</span>}
+          </h3>
           {isOwnProfile && (
             <button className="btn btn-primary btn-sm" onClick={() => navigate('/upload')}>+ Upload</button>
           )}
-        </h3>
+        </div>
 
         {videosLoading ? (
-          <div style={{ textAlign: 'center', padding: '32px' }}>
-            <div className="animate-spin" style={{ width: 28, height: 28, margin: '0 auto', border: '2px solid var(--border)', borderTopColor: 'var(--brand-red)', borderRadius: '50%' }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '3px' }}>
+            {[...Array(6)].map((_, i) => <div key={i} className="skeleton" style={{ aspectRatio: '9/16', borderRadius: '6px' }}/>)}
           </div>
         ) : videos.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
             <div style={{ fontSize: '32px', marginBottom: '8px' }}>🎬</div>
-            <p>{isOwnProfile ? 'No videos yet' : 'No videos yet'}</p>
+            <p style={{ marginBottom: '8px' }}>{isOwnProfile ? 'No videos yet' : 'No videos'}</p>
             {isOwnProfile && (
-              <button className="btn btn-primary btn-sm" style={{ marginTop: '12px' }} onClick={() => navigate('/upload')}>
-                + Upload Now
-              </button>
+              <button className="btn btn-primary btn-sm" onClick={() => navigate('/upload')}>+ Upload Now</button>
             )}
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '3px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '3px' }}>
             {videos.map(v => {
               const vid = v._id || v.id;
               return (
                 <div key={vid} style={{ aspectRatio: '9/16', background: 'var(--bg-card)', overflow: 'hidden', position: 'relative', borderRadius: '6px' }}>
                   {v.thumbnailUrl ? (
-                    <img src={v.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <img src={v.thumbnailUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}/>
                   ) : v.videoUrl ? (
-                    <video src={v.videoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline />
+                    <video src={v.videoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline/>
                   ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', background: 'var(--bg-elevated)' }}>🎬</div>
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', background: 'var(--bg-elevated)' }}>🎬</div>
                   )}
-
-                  {/* Views */}
-                  {v.viewsCount > 0 && (
-                    <div style={{ position: 'absolute', bottom: '4px', left: '4px', background: 'rgba(0,0,0,0.6)', borderRadius: '4px', padding: '2px 5px', fontSize: '0.6rem', color: 'white' }}>
-                      ▶ {fmt(v.viewsCount)}
-                    </div>
-                  )}
-
-                  {/* Likes */}
                   {v.likesCount > 0 && (
-                    <div style={{ position: 'absolute', bottom: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', borderRadius: '4px', padding: '2px 5px', fontSize: '0.6rem', color: 'white' }}>
+                    <div style={{ position: 'absolute', bottom: '4px', left: '4px', background: 'rgba(0,0,0,0.6)', borderRadius: '4px', padding: '2px 5px', fontSize: '0.6rem', color: 'white' }}>
                       ❤️ {fmt(v.likesCount)}
                     </div>
                   )}
-
-                  {/* Delete button - own profile only */}
                   {isOwnProfile && (
-                    <button
-                      onClick={() => handleDeleteVideo(vid)}
-                      disabled={deletingId === vid}
-                      style={{
-                        position: 'absolute', top: '4px', right: '4px',
-                        background: 'rgba(220,0,0,0.75)', backdropFilter: 'blur(4px)',
-                        border: 'none', borderRadius: '50%',
-                        width: '24px', height: '24px',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'white', fontSize: '11px', cursor: 'pointer',
-                        opacity: deletingId === vid ? 0.5 : 1,
-                      }}
-                    >{deletingId === vid ? '...' : '🗑'}</button>
+                    <button onClick={() => handleDeleteVideo(vid)} disabled={deletingId === vid}
+                      style={{ position: 'absolute', top: '4px', right: '4px', background: 'rgba(220,0,0,0.75)', border: 'none', borderRadius: '50%', width: '22px', height: '22px', color: 'white', fontSize: '10px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: deletingId === vid ? 0.5 : 1 }}>
+                      {deletingId === vid ? '…' : '🗑'}
+                    </button>
                   )}
                 </div>
               );

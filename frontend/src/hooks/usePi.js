@@ -1,198 +1,184 @@
 // ============================================================
-// SPYCE - Pi Network Hook
-// Wraps all Pi SDK calls in a clean React hook
+// SPYCE - usePi Hook v2
+// FIXED: purchaseItem properly handles marketplace Pi payment
+// FIXED: tipCreator flow with correct memo
+// FILE: frontend/src/hooks/usePi.js
 // ============================================================
 import { useCallback } from 'react';
-import api from '../utils/api';
 import { useAuthStore } from '../utils/store';
+import api from '../utils/api';
 import toast from 'react-hot-toast';
 
-export const usePi = () => {
-  const { setAuth, logout } = useAuthStore();
+export function usePi() {
+  const { user } = useAuthStore();
 
-  /**
-   * Authenticate with Pi Network
-   * Call this when user taps "Sign in with Pi"
-   */
-  const authenticateWithPi = useCallback(async (referralCode = null) => {
-    const Pi = window.Pi;
+  // ── Authenticate with Pi ────────────────────────────────────
+  const authenticateWithPi = useCallback(async () => {
+    if (!window.Pi) throw new Error('Pi Browser required');
 
-    if (!Pi) {
-      toast.error('Please open SPYCE in the Pi Browser');
-      return null;
-    }
-
-    try {
-      // Request username + payments scopes
-      const scopes = ['username', 'payments'];
-
-      // Handle incomplete payments found during auth
-      const onIncompletePaymentFound = async (payment) => {
-        try {
-          await api.post('/payments/incomplete', { payment });
-        } catch (err) {
-          console.error('Incomplete payment handling error:', err);
+    return new Promise((resolve, reject) => {
+      window.Pi.authenticate(
+        ['username', 'payments'],
+        async (payment) => {
+          // Incomplete payment handler
+          try {
+            await api.post('/payments/approve', { paymentId: payment.identifier });
+            await api.post('/payments/complete', { paymentId: payment.identifier, txid: payment.transaction?.txid });
+          } catch (err) {
+            console.error('Incomplete payment handling error:', err);
+          }
         }
-      };
+      ).then(authResult => {
+        resolve(authResult);
+      }).catch(reject);
+    });
+  }, []);
 
-      const auth = await Pi.authenticate(scopes, onIncompletePaymentFound);
-
-      // CRITICAL: Verify with our backend (prevents spoofing)
-      const { data } = await api.post('/auth/pi', {
-        accessToken: auth.accessToken,
-        username: auth.user.username,
-        referralCode,
-      });
-
-      setAuth(data.user, data.token);
-
-      if (data.isNewUser) {
-        toast.success(`Welcome to SPYCE, @${data.user.piUsername}! 🌶️`);
-      } else {
-        toast.success(`Welcome back, @${data.user.piUsername}!`);
-      }
-
-      return data.user;
-    } catch (err) {
-      console.error('Pi auth error:', err);
-      const msg = err.response?.data?.error || 'Login failed. Please try again.';
-      toast.error(msg);
+  // ── Tip a Creator ──────────────────────────────────────────
+  const tipCreator = useCallback(async (amount, creatorId, videoId) => {
+    if (!window.Pi) {
+      toast.error('Open in Pi Browser to tip');
       return null;
     }
-  }, [setAuth]);
-
-  /**
-   * Create a Pi Payment
-   * type: 'tip' | 'marketplace' | 'challenge_reward'
-   */
-  const createPiPayment = useCallback(async ({
-    amount,
-    memo,
-    type,
-    toUserId,
-    referenceId,
-    referenceType,
-    metadata = {},
-  }) => {
-    const Pi = window.Pi;
-
-    if (!Pi) {
-      toast.error('Please open SPYCE in the Pi Browser');
+    if (!amount || amount <= 0) {
+      toast.error('Invalid tip amount');
       return null;
     }
 
     return new Promise((resolve, reject) => {
       const paymentData = {
-        amount,
-        memo,
-        metadata: { type, referenceId, ...metadata },
+        amount: parseFloat(amount),
+        memo: `SPYCE tip — ${amount}π to creator`,
+        metadata: {
+          type: 'tip',
+          creatorId,
+          videoId,
+          tipperId: user?._id,
+        },
       };
 
-      const paymentCallbacks = {
-        // Step 1: SDK ready, approve on our server
+      const callbacks = {
         onReadyForServerApproval: async (paymentId) => {
           try {
             await api.post('/payments/approve', {
               paymentId,
-              type,
-              referenceId,
-              referenceType,
+              type: 'tip',
+              creatorId,
+              videoId,
               amount,
-              toUserId,
-              memo,
             });
           } catch (err) {
-            console.error('Approval failed:', err);
-            toast.error('Payment approval failed');
+            console.error('Approval error:', err);
             reject(err);
           }
         },
-
-        // Step 2: Blockchain confirmed, complete on our server
         onReadyForServerCompletion: async (paymentId, txid) => {
           try {
-            // ✅ FIX: Pass metadata so backend completePayment() can route by type
-            // Without metadata.type the tip was silently swallowed (no branch matched)
             const { data } = await api.post('/payments/complete', {
               paymentId,
               txid,
-              metadata: { type, referenceId, referenceType, toUserId, ...metadata },
+              type: 'tip',
+              creatorId,
+              videoId,
+              amount,
             });
-            toast.success('Payment completed! 🎉');
-            resolve({ paymentId, txid, ...data });
+            resolve(data);
           } catch (err) {
-            console.error('Completion failed:', err);
-            toast.error('Payment completion failed');
+            console.error('Completion error:', err);
             reject(err);
           }
         },
-
-        // Cancelled by user
         onCancel: (paymentId) => {
-          toast('Payment cancelled', { icon: '↩️' });
+          toast('Tip cancelled', { icon: '↩️' });
           resolve(null);
         },
-
-        // Error
         onError: (error, payment) => {
           console.error('Pi payment error:', error, payment);
-          toast.error('Payment error. Please try again.');
+          toast.error('Payment failed: ' + (error?.message || 'Unknown error'));
           reject(error);
         },
       };
 
-      // ANDROID FIX: On some Android Pi Browser versions, Pi.createPayment()
-      // returns undefined instead of a Promise. Calling .catch() on undefined
-      // throws a TypeError which rejects the whole promise, leaving loading=true
-      // forever and making the Send button disappear silently.
-      // Solution: guard with optional chaining and wrap in try/catch.
-      try {
-        const result = Pi.createPayment(paymentData, paymentCallbacks);
-        if (result && typeof result.catch === 'function') {
-          result.catch(reject);
-        }
-        // If result is undefined (older Android Pi Browser), the callbacks
-        // still fire correctly — we just don't need to chain .catch()
-      } catch (err) {
-        console.error('Pi.createPayment() threw synchronously:', err);
-        reject(err);
-      }
+      window.Pi.createPayment(paymentData, callbacks);
     });
-  }, []);
+  }, [user]);
 
-  /**
-   * Tip a creator
-   */
-  const tipCreator = useCallback(async (amount, creatorId, videoId) => {
-    return createPiPayment({
-      amount,
-      memo: `Tip on SPYCE 🌶️`,
-      type: 'tip',
-      toUserId: creatorId,
-      referenceId: videoId,
-      referenceType: 'Video',
-    });
-  }, [createPiPayment]);
-
-  /**
-   * Purchase marketplace item
-   */
+  // ── Purchase Marketplace Item ──────────────────────────────
   const purchaseItem = useCallback(async (listing) => {
-    return createPiPayment({
-      amount: listing.price,
-      memo: `Purchase: ${listing.title}`,
-      type: 'marketplace',
-      toUserId: listing.seller._id,
-      referenceId: listing._id,
-      referenceType: 'Listing',
-      metadata: { listingTitle: listing.title },
-    });
-  }, [createPiPayment]);
+    if (!window.Pi) {
+      toast.error('Open in Pi Browser to purchase');
+      return null;
+    }
+    if (!listing || !listing.price) {
+      toast.error('Invalid listing');
+      return null;
+    }
+    if (listing.stock === 0) {
+      toast.error('This item is out of stock');
+      return null;
+    }
 
-  return {
-    authenticateWithPi,
-    createPiPayment,
-    tipCreator,
-    purchaseItem,
-  };
-};
+    return new Promise((resolve, reject) => {
+      // Platform takes 5% fee
+      const platformFee = Math.round(listing.price * 0.05 * 100) / 100;
+      const sellerAmount = Math.round((listing.price - platformFee) * 100) / 100;
+
+      const paymentData = {
+        amount: parseFloat(listing.price),
+        memo: `SPYCE purchase — ${listing.title}`,
+        metadata: {
+          type: 'marketplace',
+          listingId: listing._id,
+          sellerId: listing.seller?._id || listing.seller,
+          buyerId: user?._id,
+          price: listing.price,
+          title: listing.title,
+        },
+      };
+
+      const callbacks = {
+        onReadyForServerApproval: async (paymentId) => {
+          try {
+            await api.post('/payments/approve', {
+              paymentId,
+              type: 'marketplace',
+              listingId: listing._id,
+              amount: listing.price,
+            });
+          } catch (err) {
+            console.error('Purchase approval error:', err);
+            reject(new Error('Payment approval failed'));
+          }
+        },
+        onReadyForServerCompletion: async (paymentId, txid) => {
+          try {
+            const { data } = await api.post('/payments/complete', {
+              paymentId,
+              txid,
+              type: 'marketplace',
+              listingId: listing._id,
+              amount: listing.price,
+            });
+            resolve(data);
+          } catch (err) {
+            console.error('Purchase completion error:', err);
+            reject(new Error('Payment completion failed'));
+          }
+        },
+        onCancel: () => {
+          toast('Purchase cancelled', { icon: '↩️' });
+          resolve(null);
+        },
+        onError: (error) => {
+          const msg = error?.message || 'Payment failed';
+          toast.error(msg);
+          reject(new Error(msg));
+        },
+      };
+
+      window.Pi.createPayment(paymentData, callbacks);
+    });
+  }, [user]);
+
+  return { authenticateWithPi, tipCreator, purchaseItem };
+}
