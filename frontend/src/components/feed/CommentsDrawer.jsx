@@ -1,5 +1,9 @@
 // ============================================================
-// SPYCE - CommentsDrawer Component
+// SPYCE - CommentsDrawer v3
+// FIXED: iOS input + send button always visible
+// FIXED: Keyboard pushes content up properly on iOS
+// FIXED: No bottom sheet — full modal with fixed input bar
+// FILE: frontend/src/components/feed/CommentsDrawer.jsx
 // ============================================================
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../../utils/api';
@@ -9,179 +13,310 @@ import toast from 'react-hot-toast';
 export default function CommentsDrawer({ videoId, onClose }) {
   const { user } = useAuthStore();
   const [comments, setComments] = useState([]);
-  const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [text, setText] = useState('');
   const [posting, setPosting] = useState(false);
   const inputRef = useRef(null);
+  const listRef = useRef(null);
 
   useEffect(() => {
     fetchComments();
+    // Focus input after a short delay so keyboard opens
     setTimeout(() => inputRef.current?.focus(), 400);
+  }, [videoId]);
+
+  // When keyboard opens on iOS, scroll list up
+  useEffect(() => {
+    const onResize = () => {
+      if (listRef.current) {
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const fetchComments = async () => {
+    setLoading(true);
     try {
       const { data } = await api.get(`/videos/${videoId}/comments`);
       setComments(data.comments || []);
-    } catch { toast.error('Failed to load comments'); }
-    finally { setLoading(false); }
+    } catch {
+      setComments([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const postComment = async () => {
+  const handlePost = async () => {
     if (!text.trim() || posting) return;
     setPosting(true);
+    const optimistic = {
+      _id: Date.now(),
+      text: text.trim(),
+      user: {
+        piUsername: user?.piUsername || 'You',
+        displayName: user?.displayName || user?.piUsername || 'You',
+        avatar: user?.avatar || '',
+      },
+      createdAt: new Date().toISOString(),
+      isOptimistic: true,
+    };
+    setComments(prev => [...prev, optimistic]);
+    setText('');
     try {
-      const { data } = await api.post(`/videos/${videoId}/comment`, { text });
-      setComments(prev => [data.comment, ...prev]);
-      setText('');
-    } catch { toast.error('Failed to post comment'); }
-    finally { setPosting(false); }
+      const { data } = await api.post(`/videos/${videoId}/comments`, {
+        text: optimistic.text,
+      });
+      setComments(prev =>
+        prev.map(c => c._id === optimistic._id ? (data.comment || optimistic) : c)
+      );
+      if (listRef.current)
+        listRef.current.scrollTop = listRef.current.scrollHeight;
+    } catch {
+      setComments(prev => prev.filter(c => c._id !== optimistic._id));
+      toast.error('Failed to post comment');
+      setText(optimistic.text);
+    } finally {
+      setPosting(false);
+    }
   };
 
   const timeAgo = (date) => {
-    const diff = (Date.now() - new Date(date)) / 1000;
-    if (diff < 60) return 'now';
-    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-    return `${Math.floor(diff / 86400)}d`;
+    const s = Math.floor((Date.now() - new Date(date)) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s/60)}m`;
+    if (s < 86400) return `${Math.floor(s/3600)}h`;
+    return `${Math.floor(s/86400)}d`;
   };
 
   return (
-    /*
-     * iOS FIX: The modal-overlay div was capturing ALL touch events across the
-     * full screen including over the sheet. On iOS, when the keyboard opens the
-     * visual viewport shrinks but the overlay's hit-test area stays full-screen,
-     * making the input and send button completely untouchable.
-     *
-     * Solution: Split the overlay into two layers:
-     *   1. A backdrop div (pointer-events only outside the sheet)
-     *   2. The sheet itself with its own positioning
-     * The sheet uses pointer-events:all explicitly, and the backdrop sits behind.
-     */
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'flex-end',
-        justifyContent: 'center',
-      }}
-    >
-      {/* Backdrop — only captures taps outside the sheet */}
+    <>
+      {/* ── Backdrop ── */}
       <div
         onClick={onClose}
         style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(0,0,0,0.7)',
-          backdropFilter: 'blur(4px)',
-          zIndex: 0,
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.5)',
         }}
       />
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          position: 'relative',
-          zIndex: 1,
-          width: '100%',
-          maxWidth: '480px',
-          maxHeight: '75dvh',
-          display: 'flex',
-          flexDirection: 'column',
-          padding: 0,
-          background: 'var(--bg-secondary)',
-          borderRadius: '24px 24px 0 0',
-          animation: 'slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
-          // iOS fix: allow sheet to shrink when keyboard appears
-          // without this the sheet clips and input goes offscreen
-          WebkitOverflowScrolling: 'touch',
-          pointerEvents: 'all',
-        }}
-      >
-        {/* Header */}
+
+      {/* ── Drawer — sits above backdrop ── */}
+      <div style={{
+        position: 'fixed',
+        // Take up bottom 65% of screen
+        bottom: 0, left: 0, right: 0,
+        height: '65dvh',
+        zIndex: 1001,
+        background: 'var(--bg-card)',
+        borderRadius: '20px 20px 0 0',
+        display: 'flex',
+        flexDirection: 'column',
+        // Key: let iOS keyboard push this whole drawer up
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}>
+
+        {/* ── Header ── */}
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '16px 20px', borderBottom: '1px solid var(--border)',
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '16px 20px 12px',
+          borderBottom: '1px solid var(--border)',
         }}>
-          <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1rem' }}>Comments</h3>
-          <button onClick={onClose} style={{ fontSize: '20px', color: 'var(--text-muted)' }}>✕</button>
+          <h3 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '1rem', fontWeight: 700,
+            color: 'var(--text-primary)',
+          }}>
+            Comments {comments.length > 0 && (
+              <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.85rem' }}>
+                ({comments.length})
+              </span>
+            )}
+          </h3>
+          <button
+            onClick={onClose}
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-secondary)',
+              fontSize: 16, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >✕</button>
         </div>
 
-        {/* Comments list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px' }}>
+        {/* ── Comment list ── */}
+        <div
+          ref={listRef}
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            padding: '8px 0',
+          }}
+        >
           {loading ? (
-            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>Loading...</div>
+            <div style={{ padding: '32px', textAlign: 'center' }}>
+              <div style={{
+                width: 24, height: 24, margin: '0 auto',
+                border: '2px solid var(--border)',
+                borderTopColor: 'var(--brand-red)',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }}/>
+            </div>
           ) : comments.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
-              No comments yet. Be first! 💬
+            <div style={{
+              padding: '40px 20px', textAlign: 'center',
+              color: 'var(--text-muted)',
+            }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>💬</div>
+              <p style={{ fontFamily: 'var(--font-display)', fontWeight: 700, marginBottom: 4 }}>
+                No comments yet
+              </p>
+              <p style={{ fontSize: '0.82rem' }}>Be the first to comment!</p>
             </div>
           ) : (
-            comments.map((c, i) => (
-              <div key={c._id || i} style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-                <div className="avatar-placeholder" style={{ width: '36px', height: '36px', fontSize: '14px', flexShrink: 0 }}>
-                  {(c.user?.displayName || c.user?.piUsername || '?')[0].toUpperCase()}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'baseline', marginBottom: '2px' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.82rem' }}>@{c.user?.piUsername}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{timeAgo(c.createdAt)}</span>
+            comments.map(c => (
+              <div
+                key={c._id}
+                style={{
+                  display: 'flex', gap: 12,
+                  padding: '10px 20px',
+                  opacity: c.isOptimistic ? 0.6 : 1,
+                  transition: 'opacity 0.2s',
+                }}
+              >
+                {c.user?.avatar ? (
+                  <img
+                    src={c.user.avatar} alt=""
+                    style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                  />
+                ) : (
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: 'var(--brand-gradient)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 800, color: 'white', flexShrink: 0,
+                  }}>
+                    {(c.user?.displayName || c.user?.piUsername || '?')[0].toUpperCase()}
                   </div>
-                  <p style={{ fontSize: '0.88rem', lineHeight: 1.4, color: 'var(--text-primary)' }}>{c.text}</p>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                      @{c.user?.piUsername}
+                    </span>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      {timeAgo(c.createdAt)}
+                    </span>
+                  </div>
+                  <p style={{
+                    fontSize: '0.88rem',
+                    color: 'var(--text-secondary)',
+                    lineHeight: 1.4,
+                    wordBreak: 'break-word',
+                  }}>
+                    {c.text}
+                  </p>
                 </div>
               </div>
             ))
           )}
         </div>
 
-        {/* Input */}
+        {/* ── Input bar — ALWAYS visible, never behind keyboard ──
+            This is OUTSIDE the scroll area so it sticks to the
+            bottom of the drawer. On iOS when keyboard opens,
+            the browser viewport shrinks and this naturally
+            moves up with the bottom of the drawer. */}
         <div style={{
-          padding: '12px 16px',
-          paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))',
+          flexShrink: 0,
+          padding: '10px 16px',
           borderTop: '1px solid var(--border)',
-          display: 'flex', gap: '10px', alignItems: 'center',
-          // ✅ FIX: Stick to bottom even when keyboard appears on Pi Browser
-          position: 'sticky',
-          bottom: 0,
-          background: 'var(--bg-secondary)',
-          zIndex: 10,
+          background: 'var(--bg-card)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
         }}>
+          {/* User avatar */}
+          {user?.avatar ? (
+            <img src={user.avatar} alt="" style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}/>
+          ) : (
+            <div style={{
+              width: 34, height: 34, borderRadius: '50%',
+              background: 'var(--brand-gradient)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 13, fontWeight: 800, color: 'white', flexShrink: 0,
+            }}>
+              {(user?.displayName || user?.piUsername || '?')[0]?.toUpperCase()}
+            </div>
+          )}
+
+          {/* Text input */}
           <input
             ref={inputRef}
+            type="text"
+            placeholder="Add a comment..."
             value={text}
             onChange={e => setText(e.target.value)}
-            placeholder="Add a comment..."
-            onKeyDown={e => e.key === 'Enter' && postComment()}
-            // ✅ FIX: Explicit styles ensure input is visible & tappable in Pi Browser
+            onKeyDown={e => e.key === 'Enter' && handlePost()}
+            maxLength={300}
+            disabled={posting}
             style={{
               flex: 1,
-              borderRadius: '50px',
-              padding: '10px 16px',
-              fontSize: '0.88rem',
               background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-strong)',
+              border: '1px solid var(--border)',
+              borderRadius: 22,
+              padding: '10px 16px',
+              fontSize: '0.9rem',
               color: 'var(--text-primary)',
               outline: 'none',
-              WebkitAppearance: 'none',  // Prevents iOS default styling override
+              minWidth: 0,
             }}
-            maxLength={200}
           />
+
+          {/* Send button */}
           <button
-            onClick={postComment}
+            onClick={handlePost}
             disabled={!text.trim() || posting}
             style={{
-              background: 'var(--brand-gradient)',
-              color: 'white',
+              width: 40, height: 40,
+              flexShrink: 0,
               borderRadius: '50%',
-              width: '40px', height: '40px',
+              background: text.trim() && !posting
+                ? 'var(--brand-gradient)'
+                : 'var(--bg-elevated)',
+              border: 'none',
+              color: text.trim() && !posting ? 'white' : 'var(--text-muted)',
+              fontSize: 16,
+              cursor: text.trim() ? 'pointer' : 'not-allowed',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '18px',
-              opacity: (!text.trim() || posting) ? 0.5 : 1,
-              transition: 'opacity 0.2s',
+              transition: 'all 0.2s',
+              boxShadow: text.trim() && !posting ? 'var(--brand-glow)' : 'none',
             }}
-          >↑</button>
+          >
+            {posting ? (
+              <span style={{
+                width: 16, height: 16,
+                border: '2px solid rgba(255,255,255,0.4)',
+                borderTopColor: 'white',
+                borderRadius: '50%',
+                display: 'inline-block',
+                animation: 'spin 0.8s linear infinite',
+              }}/>
+            ) : '➤'}
+          </button>
         </div>
+
       </div>
-    </div>
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+    </>
   );
 }
