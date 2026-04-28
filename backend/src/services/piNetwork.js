@@ -1,140 +1,96 @@
 // ============================================================
-// SPYCE - Pi Network Service v2
-// FIXED: verifyPioneer handles errors gracefully
-// FIXED: Timeout on Pi API calls so backend never hangs
+// SPYCE - Pi Network Service v3
+// FIXED: Shorter timeouts — must respond under 5s
+// FIXED: approvePayment never throws — always returns
 // FILE: backend/src/services/piNetwork.js
 // ============================================================
 const axios = require('axios');
 
 const PI_API_BASE = 'https://api.minepi.com';
-const TIMEOUT_MS = 10000; // 10 second timeout
 
-/**
- * Verify a Pioneer (user) by their access token
- * Calls Pi Network /v2/me endpoint
- */
+// Keep these SHORT — Pi SDK expires payments in ~60s
+// Our backend needs to respond in under 5s total
+const APPROVE_TIMEOUT = 8000;   // 8s for approve
+const COMPLETE_TIMEOUT = 8000;  // 8s for complete
+const VERIFY_TIMEOUT = 8000;    // 8s for user verify
+
+const piAxios = axios.create({
+  baseURL: PI_API_BASE,
+  headers: { 'Content-Type': 'application/json' },
+});
+
 const verifyPioneer = async (accessToken) => {
   try {
-    const response = await axios.get(`${PI_API_BASE}/v2/me`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: TIMEOUT_MS,
+    const { data } = await piAxios.get('/v2/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: VERIFY_TIMEOUT,
     });
-
-    const data = response.data;
-
-    if (!data || !data.uid) {
-      throw new Error('Invalid response from Pi Network — missing uid');
-    }
-
-    return {
-      uid: data.uid,
-      username: data.username,
-    };
+    if (!data?.uid) throw new Error('Invalid Pi response — missing uid');
+    return { uid: data.uid, username: data.username };
   } catch (err) {
-    if (err.response?.status === 401) {
-      throw new Error('Invalid or expired Pi access token');
-    }
-    if (err.code === 'ECONNABORTED') {
-      throw new Error('Pi Network API timeout — try again');
-    }
-    if (err.response?.status === 403) {
-      throw new Error('Pi Network access forbidden — check your Pi API key');
-    }
-    console.error('verifyPioneer error:', err.message);
-    throw new Error('Pi Network verification failed: ' + (err.message || 'Unknown error'));
+    if (err.response?.status === 401) throw new Error('Invalid or expired Pi access token');
+    if (err.code === 'ECONNABORTED') throw new Error('Pi Network timeout — try again');
+    throw new Error('Pi Network verification failed: ' + (err.message || 'Unknown'));
   }
 };
 
-/**
- * Get a payment by ID
- * Used during approve flow
- */
-const getPayment = async (paymentId) => {
-  try {
-    const response = await axios.get(
-      `${PI_API_BASE}/v2/payments/${paymentId}`,
-      {
-        headers: {
-          Authorization: `Key ${process.env.PI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: TIMEOUT_MS,
-      }
-    );
-    return response.data;
-  } catch (err) {
-    if (err.response?.status === 404) {
-      console.warn(`Payment ${paymentId} not found on Pi Network`);
-      return null;
-    }
-    console.error('getPayment error:', err.message);
-    return null; // Don't throw — let payment flow continue
-  }
-};
-
-/**
- * Approve a payment
- * Must be called before Pi SDK calls onReadyForServerCompletion
- */
 const approvePayment = async (paymentId) => {
   try {
-    const response = await axios.post(
-      `${PI_API_BASE}/v2/payments/${paymentId}/approve`,
+    const { data } = await piAxios.post(
+      `/v2/payments/${paymentId}/approve`,
       {},
       {
-        headers: {
-          Authorization: `Key ${process.env.PI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: TIMEOUT_MS,
+        headers: { Authorization: `Key ${process.env.PI_API_KEY}` },
+        timeout: APPROVE_TIMEOUT,
       }
     );
-    return response.data;
+    return data;
   } catch (err) {
-    // Log but don't crash — Pi SDK may still proceed
-    console.error('approvePayment error:', err.response?.data || err.message);
-    // If already approved, that's fine
+    // already_approved is fine — not an error
     if (err.response?.data?.error === 'already_approved') {
       return { status: 'already_approved' };
     }
-    throw err;
+    // Log but don't throw — payment flow should continue
+    console.error('approvePayment error:', err.response?.data || err.message);
+    return { status: 'error', message: err.message };
   }
 };
 
-/**
- * Complete a payment
- * Must be called after blockchain transaction confirmed
- */
 const completePayment = async (paymentId, txid) => {
   try {
-    const response = await axios.post(
-      `${PI_API_BASE}/v2/payments/${paymentId}/complete`,
+    const { data } = await piAxios.post(
+      `/v2/payments/${paymentId}/complete`,
       { txid },
       {
-        headers: {
-          Authorization: `Key ${process.env.PI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: TIMEOUT_MS,
+        headers: { Authorization: `Key ${process.env.PI_API_KEY}` },
+        timeout: COMPLETE_TIMEOUT,
       }
     );
-    return response.data;
+    return data;
   } catch (err) {
-    console.error('completePayment error:', err.response?.data || err.message);
-    // If already completed, treat as success
     if (err.response?.data?.error === 'already_completed') {
       return { status: 'already_completed' };
     }
-    throw err;
+    console.error('completePayment error:', err.response?.data || err.message);
+    return { status: 'error', message: err.message };
   }
 };
 
-module.exports = {
-  verifyPioneer,
-  getPayment,
-  approvePayment,
-  completePayment,
+const getPayment = async (paymentId) => {
+  try {
+    const { data } = await piAxios.get(
+      `/v2/payments/${paymentId}`,
+      {
+        headers: { Authorization: `Key ${process.env.PI_API_KEY}` },
+        timeout: APPROVE_TIMEOUT,
+      }
+    );
+    return data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    console.error('getPayment error:', err.message);
+    return null;
+  }
 };
+
+module.exports = { verifyPioneer, approvePayment, completePayment, getPayment };

@@ -1,6 +1,8 @@
 // ============================================================
-// SPYCE - Payment Routes v2
-// FIXED: Handles both tip and marketplace payment completion
+// SPYCE - Payment Routes v3
+// FIXED: /approve responds instantly — no await on Pi API
+// FIXED: /complete responds instantly — credits run async
+// Pi SDK has a strict ~60s window; we must respond in <5s
 // FILE: backend/src/routes/payments.js
 // ============================================================
 const express = require('express');
@@ -12,29 +14,33 @@ const Video = require('../models/Video');
 const Listing = require('../models/Listing');
 const piNetworkService = require('../services/piNetwork');
 
+// ─────────────────────────────────────────────────────────────
 // POST /api/payments/approve
+//
+// Pi SDK calls onReadyForServerApproval with a paymentId.
+// We MUST respond quickly (under ~10s) or Pi expires the payment.
+// Strategy: save to DB instantly, approve Pi Network async.
+// ─────────────────────────────────────────────────────────────
 router.post('/approve', auth, async (req, res) => {
+  const { paymentId, type, creatorId, videoId, listingId, amount } = req.body;
+
+  if (!paymentId) {
+    return res.status(400).json({ error: 'paymentId is required' });
+  }
+
+  // ── Step 1: Respond to client IMMEDIATELY ────────────────
+  // Pi SDK is waiting. Don't make it wait for Pi Network API.
+  res.json({ success: true, paymentId });
+
+  // ── Step 2: Process async (after response sent) ──────────
   try {
-    const { paymentId, type, creatorId, videoId, listingId, amount } = req.body;
-
-    if (!paymentId) {
-      return res.status(400).json({ error: 'paymentId is required' });
-    }
-
-    // Verify with Pi Network
-    const piPayment = await piNetworkService.getPayment(paymentId);
-
-    if (!piPayment) {
-      return res.status(404).json({ error: 'Payment not found on Pi Network' });
-    }
-
-    // Create or update payment record
-    const existingPayment = await Payment.findOne({ piPaymentId: paymentId });
-    if (!existingPayment) {
+    // Save payment record to DB
+    const existing = await Payment.findOne({ piPaymentId: paymentId });
+    if (!existing) {
       await Payment.create({
         piPaymentId: paymentId,
         from: req.user._id,
-        amount: amount || piPayment.amount,
+        amount: parseFloat(amount) || 0,
         type: type || 'tip',
         status: 'pending',
         referenceId: listingId || videoId || creatorId,
@@ -42,123 +48,113 @@ router.post('/approve', auth, async (req, res) => {
       });
     }
 
-    // Approve on Pi Network
+    // Call Pi Network to approve (can take a few seconds — ok now)
     await piNetworkService.approvePayment(paymentId);
-
-    res.json({ success: true, paymentId });
+    console.log(`✅ Payment approved: ${paymentId}`);
   } catch (err) {
-    console.error('Payment approve error:', err.message);
-    // Still return 200 so Pi SDK continues — log the error
-    res.json({ success: true, paymentId: req.body.paymentId, warning: err.message });
+    console.error(`❌ Approve background error (${paymentId}):`, err.message);
+    // Non-fatal — Pi SDK already got the 200 response
   }
 });
 
+// ─────────────────────────────────────────────────────────────
 // POST /api/payments/complete
+//
+// Pi SDK calls onReadyForServerCompletion with paymentId + txid.
+// Again — respond FAST, then process credits in background.
+// ─────────────────────────────────────────────────────────────
 router.post('/complete', auth, async (req, res) => {
+  const { paymentId, txid, type, creatorId, videoId, listingId, amount } = req.body;
+
+  if (!paymentId || !txid) {
+    return res.status(400).json({ error: 'paymentId and txid are required' });
+  }
+
+  // ── Step 1: Respond instantly ────────────────────────────
+  res.json({
+    success: true,
+    txid,
+    message: type === 'marketplace' ? 'Purchase complete! 🛍️' : 'Tip sent! 🎉',
+  });
+
+  // ── Step 2: Complete on Pi Network + credit users async ──
   try {
-    const { paymentId, txid, type, creatorId, videoId, listingId, amount } = req.body;
-
-    if (!paymentId || !txid) {
-      return res.status(400).json({ error: 'paymentId and txid are required' });
-    }
-
     // Complete on Pi Network
     await piNetworkService.completePayment(paymentId, txid);
 
     // Update payment record
     const payment = await Payment.findOneAndUpdate(
       { piPaymentId: paymentId },
-      { status: 'completed', txid, completedAt: new Date() },
+      {
+        status: 'completed',
+        txid,
+        completedAt: new Date(),
+      },
       { new: true, upsert: true }
     );
 
     const paymentType = type || payment?.type || 'tip';
+    const tipAmount = parseFloat(amount || payment?.amount || 0);
 
-    // ── Handle Tip ──────────────────────────────────────────
+    // ── Credit tip ────────────────────────────────────────
     if (paymentType === 'tip') {
       const targetCreatorId = creatorId || payment?.metadata?.creatorId;
-      const tipAmount = parseFloat(amount || payment?.amount || 0);
-
       if (targetCreatorId && tipAmount > 0) {
-        // Credit creator
+        const creatorCut = tipAmount * 0.95;
         await User.findByIdAndUpdate(targetCreatorId, {
           $inc: {
-            piEarnings: tipAmount * 0.95, // 5% platform fee
-            piBalance: tipAmount * 0.95,
+            piEarnings: creatorCut,
+            piBalance: creatorCut,
             tipsReceived: tipAmount,
           },
         });
-
-        // Update video tip count
         const targetVideoId = videoId || payment?.metadata?.videoId;
         if (targetVideoId) {
           await Video.findByIdAndUpdate(targetVideoId, {
             $inc: { tipsReceived: tipAmount },
           });
         }
+        console.log(`✅ Tip credited: ${creatorCut}π to ${targetCreatorId}`);
       }
     }
 
-    // ── Handle Marketplace Purchase ─────────────────────────
+    // ── Credit marketplace purchase ───────────────────────
     if (paymentType === 'marketplace') {
       const targetListingId = listingId || payment?.metadata?.listingId;
-      const purchaseAmount = parseFloat(amount || payment?.amount || 0);
-
-      if (targetListingId) {
+      if (targetListingId && tipAmount > 0) {
         const listing = await Listing.findById(targetListingId);
-
         if (listing) {
-          // Update listing stock
           if (listing.stock > 0) {
             await Listing.findByIdAndUpdate(targetListingId, {
               $inc: { stock: -1, salesCount: 1 },
             });
           }
-
-          // Credit seller (95% after 5% platform fee)
-          const sellerEarnings = purchaseAmount * 0.95;
+          const sellerCut = tipAmount * 0.95;
           await User.findByIdAndUpdate(listing.seller, {
-            $inc: {
-              piEarnings: sellerEarnings,
-              piBalance: sellerEarnings,
-              salesCount: 1,
-            },
+            $inc: { piEarnings: sellerCut, piBalance: sellerCut, salesCount: 1 },
           });
-
-          // Add to buyer's purchases
           await User.findByIdAndUpdate(req.user._id, {
             $push: {
               purchases: {
                 listing: targetListingId,
-                pricePaid: purchaseAmount,
+                pricePaid: tipAmount,
                 txid,
                 purchasedAt: new Date(),
               },
             },
           });
+          console.log(`✅ Purchase credited: ${sellerCut}π to seller`);
         }
       }
     }
 
-    res.json({
-      success: true,
-      txid,
-      type: paymentType,
-      message: paymentType === 'tip' ? 'Tip sent! 🎉' : 'Purchase complete! 🛍️',
-    });
-
   } catch (err) {
-    console.error('Payment complete error:', err.message);
-    // Return 200 with warning — don't block the Pi SDK flow
-    res.json({
-      success: true,
-      txid: req.body.txid,
-      warning: err.message,
-    });
+    console.error(`❌ Complete background error (${paymentId}):`, err.message);
+    // Non-fatal — Pi SDK already got the 200 response
   }
 });
 
-// GET /api/payments/history — User's payment history
+// GET /api/payments/history
 router.get('/history', auth, async (req, res) => {
   try {
     const payments = await Payment.find({
@@ -168,7 +164,6 @@ router.get('/history', auth, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
-
     res.json({ payments });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch payment history' });

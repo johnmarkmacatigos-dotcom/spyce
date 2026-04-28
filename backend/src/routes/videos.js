@@ -369,4 +369,88 @@ router.post('/save', auth, async (req, res) => {
   }
 });
 
+// GET /api/videos/:videoId/comments
+router.get('/:videoId/comments', async (req, res) => {
+  try {
+    const video = await Video.findById(req.params.videoId)
+      .select('comments')
+      .populate('comments.user', 'piUsername displayName avatar isVerified');
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+    const sorted = (video.comments || [])
+      .filter(c => !c.isHidden)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json({ comments: sorted, total: sorted.length });
+  } catch (err) {
+    console.error('Get comments error:', err);
+    res.status(500).json({ error: 'Failed to fetch comments' });
+  }
+});
+
+// POST /api/videos/:videoId/comments
+router.post('/:videoId/comments', auth, async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ error: 'Comment text is required' });
+    if (text.trim().length > 300) return res.status(400).json({ error: 'Comment too long (max 300 chars)' });
+
+    const video = await Video.findById(req.params.videoId);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+
+    const comment = {
+      user: req.user._id,
+      text: text.trim(),
+      createdAt: new Date(),
+    };
+
+    video.comments.push(comment);
+    video.commentsCount = (video.commentsCount || 0) + 1;
+    await video.save();
+
+    // Notify creator
+    if (video.creator.toString() !== req.user._id.toString()) {
+      const User = require('../models/User');
+      await User.findByIdAndUpdate(video.creator, {
+        $push: {
+          notifications: {
+            type: 'comment',
+            from: req.user._id,
+            message: `@${req.user.piUsername} commented: "${text.trim().slice(0, 50)}"`,
+            videoId: video._id,
+          },
+        },
+      });
+    }
+
+    const newComment = video.comments[video.comments.length - 1];
+    const populated = await Video.findById(req.params.videoId)
+      .select('comments')
+      .populate('comments.user', 'piUsername displayName avatar');
+    const populatedComment = populated.comments.id(newComment._id);
+
+    res.status(201).json({ success: true, comment: populatedComment });
+  } catch (err) {
+    console.error('Post comment error:', err);
+    res.status(500).json({ error: 'Failed to post comment' });
+  }
+});
+
+// DELETE /api/videos/:videoId/comments/:commentId
+router.delete('/:videoId/comments/:commentId', auth, async (req, res) => {
+  try {
+    const video = await Video.findById(req.params.videoId);
+    if (!video) return res.status(404).json({ error: 'Video not found' });
+    const comment = video.comments.id(req.params.commentId);
+    if (!comment) return res.status(404).json({ error: 'Comment not found' });
+    const isOwner = comment.user.toString() === req.user._id.toString();
+    const isVideoOwner = video.creator.toString() === req.user._id.toString();
+    if (!isOwner && !isVideoOwner) return res.status(403).json({ error: 'Not authorized' });
+    comment.isHidden = true;
+    video.commentsCount = Math.max(0, (video.commentsCount || 1) - 1);
+    await video.save();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete comment' });
+  }
+});
+
 module.exports = router;

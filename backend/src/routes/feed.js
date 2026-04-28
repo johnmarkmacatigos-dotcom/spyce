@@ -10,7 +10,6 @@ const { optionalAuth } = require('../middleware/auth');
 /**
  * GET /api/feed
  * Main For You Page (FYP) feed
- * 
  * Algorithm factors:
  * - Recent videos (last 7 days weighted higher)
  * - Engagement score (likes × 2, comments × 3, shares × 4)
